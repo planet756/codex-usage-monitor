@@ -1,0 +1,121 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOFLAGS: -mod=readonly
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: main
+
+  ci:
+    needs: version
+    if: needs.version.outputs.created == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.version.outputs.sha }}
+      release_validation: true
+
+  publish:
+    needs: [version, ci]
+    if: needs.version.outputs.created == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_SHA: ${{ needs.version.outputs.sha }}
+      RELEASE_ID: ${{ needs.version.outputs.id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-${{ needs.version.outputs.sha }}
+          path: dist/portable
+      - name: Verify build checksum and read source version
+        shell: bash
+        run: |
+          (cd dist/portable && sha256sum --check SHA256SUMS)
+          version=$(sh build.sh --version)
+          printf 'SOURCE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+      - name: Validate release source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:SOURCE_VERSION
+          if ($env:RELEASE_TAG -cne "v$version") { throw 'Release version mismatch' }
+          $tagSHA = git rev-list -n 1 $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0 -or $tagSHA -cne $env:RELEASE_SHA) { throw 'Tag commit mismatch' }
+          $release = gh api "repos/$env:GH_REPO/releases/$env:RELEASE_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$release.draft -or $release.tag_name -cne $env:RELEASE_TAG) {
+            throw 'Expected the newly created draft release'
+          }
+      - name: Verify EXE and package release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = Join-Path $PWD.Path 'dist/portable'
+          $exe = Join-Path $portable 'CodexUsageMonitor.exe'
+          $actualVersion = (& $exe --version | Out-String).Trim()
+          $version = $env:SOURCE_VERSION
+          if ($LASTEXITCODE -ne 0 -or $actualVersion -cne "Codex Usage Monitor $version") {
+            throw 'EXE version mismatch'
+          }
+          $prefix = "CodexUsageMonitor-$env:RELEASE_TAG"
+          New-Item -ItemType Directory -Path dist/releases -Force | Out-Null
+          Copy-Item $exe "dist/releases/$prefix-windows-amd64.exe"
+          Compress-Archive -Path "$portable/*" -DestinationPath "dist/releases/$prefix-windows-amd64-portable.zip" -Force
+          $lines = Get-ChildItem dist/releases -File | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          [IO.File]::WriteAllLines((Join-Path $PWD.Path 'dist/releases/SHA256SUMS'), [string[]]$lines)
+      - name: Upload assets and publish draft
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tagRef = gh api "repos/$env:GH_REPO/git/ref/tags/$env:RELEASE_TAG" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $tagRef.object.type -cne 'commit' -or $tagRef.object.sha -cne $env:RELEASE_SHA) {
+            throw 'Release tag moved'
+          }
+          $release = gh api "repos/$env:GH_REPO/releases/$env:RELEASE_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or !$release.draft) { throw 'Release is no longer a draft' }
+          $assets = @(Get-ChildItem dist/releases -File | ForEach-Object FullName)
+          gh release upload $env:RELEASE_TAG @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Asset upload failed; draft retained' }
+          gh release edit $env:RELEASE_TAG --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

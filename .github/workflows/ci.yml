@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact source commit to test
+        required: false
+        type: string
+        default: ''
+      release_validation:
+        description: Protect validation for a release and retain its Windows build
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GOFLAGS: -mod=readonly
+
+concurrency:
+  group: ${{ inputs.release_validation && format('release-ci-{0}', github.run_id) || format('ci-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !inputs.release_validation }}
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        id: go
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Locate Go caches
+        id: cache-paths
+        shell: bash
+        run: |
+          module_cache=$(go env GOMODCACHE)
+          build_cache=$(go env GOCACHE)
+          printf 'modules=%s\nbuild=%s\n' "$module_cache" "$build_cache" >> "$GITHUB_OUTPUT"
+      - name: Cache Go modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ steps.cache-paths.outputs.modules }}
+          key: gomod-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+          restore-keys: gomod-${{ runner.os }}-${{ runner.arch }}-
+      - name: Cache Go build results
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ steps.cache-paths.outputs.build }}
+          key: gobuild-${{ matrix.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.mod', 'go.sum', '**/*.go', 'build.sh', 'tools/ui-preview/preview.html') }}
+          restore-keys: gobuild-${{ matrix.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
+      - name: Reject tracked private files and build outputs
+        shell: bash
+        run: |
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              dist/*|diagnostics/*|docs/*|.agents/*|.aws/*|.codex/*|.secrets/*|.env*|*/.env*|*/.secrets/*|settings.json|overlay-status.json|*.exe|*.test|*.jsonl|*.log|*.sqlite|*.db|*.prof)
+                printf 'Remove private or generated file from Git: %s\n' "$file"
+                exit 1 ;;
+            esac
+          done < <(git ls-files -z)
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l cmd internal tools)
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Race tests and static checks
+        if: runner.os == 'Linux'
+        run: |
+          go test -race -count=1 ./...
+          go vet ./...
+      - name: Windows tests on GitHub-hosted runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          go test -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Native tests failed' }
+          go vet -unsafeptr=false ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Static checks failed' }
+      - name: Build Windows EXE with shared script
+        if: runner.os == 'Windows'
+        shell: bash
+        run: sh build.sh dist/ci
+      - name: Retain validated Windows release build
+        if: runner.os == 'Windows' && inputs.release_validation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-${{ inputs.ref }}
+          path: dist/ci/
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+      - name: Verify source archive, version and layout preview
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          archive_dir="$RUNNER_TEMP/codex-source-check"
+          mkdir -p "$archive_dir"
+          git archive HEAD | tar -x -C "$archive_dir"
+          cd "$archive_dir"
+          version=$(sh build.sh --version)
+          test "$(go run ./cmd/codex-usage-monitor --version)" = "Codex Usage Monitor $version"
+          go run ./tools/ui-preview "$RUNNER_TEMP/codex-usage-preview/index.html"

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex Usage Monitor · Layout preview</title>
+<style>
+@font-face{font-family:Segoe;src:url(segoeui.ttf)}@font-face{font-family:Segoe;src:url(seguisb.ttf);font-weight:600}
+@font-face{font-family:Chinese;src:url(msyh.ttc)}
+*{box-sizing:border-box}body{margin:0 auto;max-width:940px;padding:24px;background:#f9f9f9;color:#242424;font:13px/1.5 Segoe,Chinese,sans-serif}
+h1{font-size:18px;font-weight:600;margin:0 0 4px}body>p{margin:0 0 20px;color:#656565;font-size:12px}
+.controls{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:24px}label{display:block;font-size:12px;color:#656565}
+select,button{font:13px Segoe,Chinese,sans-serif;background:#fff;border:1px solid #cfcfcf;border-radius:6px;color:#242424}
+.controls select{height:32px;margin-top:6px;padding:0 10px;min-width:100px}
+main{display:flex;gap:32px;align-items:start;flex-wrap:wrap}.telemetry{width:min(320px,100%);display:flex;align-items:end;flex-direction:column;gap:8px}
+.bar,.panel{color:var(--text);background:var(--panel)}.panel{border:1px solid var(--border)}
+.bar{width:100%;height:26px;display:grid;grid-template-columns:1fr 1fr;align-items:center;padding:0;gap:0;border:0;border-radius:6px;background:var(--strip);cursor:pointer;position:relative}
+.group{display:flex;align-items:center;justify-content:flex-start;min-width:0;overflow:hidden;white-space:nowrap;font-size:12px;height:100%}.first{padding:0 4px 0 8px}.second{padding:0 18px 0 4px}
+.divider{position:absolute;left:50%;top:7px;bottom:7px;width:1px;background:var(--border)}
+.values{display:flex;align-items:baseline;white-space:nowrap}.counts,.count-sep{font-size:12px;color:var(--text);white-space:pre}
+.num{font:12px Segoe,Chinese,sans-serif;font-variant-numeric:tabular-nums}.unit{font-size:12px;color:var(--muted);white-space:pre}
+.bar .num,.bar .unit{font:12px Segoe,Chinese,sans-serif;font-variant-numeric:tabular-nums}
+.chevron{position:absolute;right:7px;top:10px;width:6px;height:6px;border-left:1px solid var(--muted);border-top:1px solid var(--muted);transform:rotate(45deg)}
+.bar[aria-expanded=false] .chevron{transform:rotate(225deg);top:8px}.panel{width:100%;height:var(--detail-height,342px);border-radius:8px;position:relative}
+.panel h2{display:flex;align-items:baseline;gap:8px;position:absolute;left:16px;right:16px;top:10px;height:26px;line-height:26px;font-size:12px;font-weight:600;margin:0}
+.id{position:absolute;top:36px;left:16px;right:16px;font:12px/18px Segoe,Chinese,sans-serif;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.header-counts{font-size:12px;font-weight:400;color:var(--muted);white-space:nowrap;flex:none}
+.panel .title{white-space:nowrap;flex:none}
+.row{position:absolute;left:16px;right:16px;height:24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.row .label{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row .value{display:flex;align-items:baseline;flex:none}.row .value .unit{line-height:24px}
+.total .num{font-size:12px}.panel hr{position:absolute;top:var(--detail-rule,198px);left:16px;right:16px;height:1px;background:var(--rule);border:0;margin:0}
+.foot{position:absolute;left:16px;right:16px;top:var(--detail-footer,316px);margin:0;font-size:12px;line-height:18px;color:var(--muted)}
+.settings{width:min(420px,100%);height:312px;position:relative;background:#fff;border:1px solid #dedede;border-radius:8px}
+.settings h2{position:absolute;left:22px;top:18px;margin:0;font-size:18px;font-weight:600;line-height:26px}
+.settings .brand{position:absolute;left:22px;top:46px;font-size:12px;color:#656565;margin:0}
+.settings hr{position:absolute;top:76px;left:22px;right:22px;height:1px;border:0;background:#ececec;margin:0}
+.field{position:absolute;left:22px;right:22px;top:92px}.field.appearance{top:172px}
+.field label{font-size:13px;color:#242424;height:22px}.field select{height:32px;width:100%;margin-top:4px;padding:0 10px}
+.save-status{position:absolute;left:22px;top:271px;font-size:12px;line-height:22px;color:#656565;margin:0}
+.settings button{position:absolute;right:22px;top:266px;width:84px;height:32px}
+button:hover,select:hover{border-color:#999}button:focus-visible,select:focus-visible{outline:2px solid #656565;outline-offset:2px}
+[hidden]{display:none!important}@media(max-width:600px){body{padding:16px}.controls{gap:8px}main{gap:24px}}
+</style>
+<h1>Codex Usage Monitor</h1><p>Layout preview · Sample data · Native Windows rendering requires verification</p>
+<div class="controls" aria-label="Preview controls">
+<label>Theme<select id="theme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+<label>Data<select id="state"><option value="sample">Sample</option><option value="caption">Titlebar example</option><option value="skipped">Skipped samples</option><option value="zero">Zero</option><option value="missing">Missing</option><option value="partial">Partial history</option><option value="large">Large counts</option><option value="loading">Loading</option></select></label>
+<label>Strip width<select id="width"><option value="auto">Fit content</option><option value="320">320 DIP (stress test)</option><option value="400">400 DIP (stress test)</option><option value="480">480 DIP (stress test)</option></select></label>
+</div>
+<main>
+<section class="telemetry" aria-label="Current chat telemetry">
+<button class="bar" aria-expanded="true"><span class="group first"><span class="values activity"><span class="counts"></span><span class="count-sep"> · </span><span class="values rate"></span></span></span><span class="group second"><span class="values usage"></span></span><span class="divider"></span><i class="chevron"></i></button>
+<article class="panel"><h2><span class="title"></span><span class="header-counts"></span></h2><p class="id">8d9e21ab-4170-4e60-a658-0b218f025a31</p><div class="rows"></div><hr><p class="foot coverage"></p></article>
+</section>
+<section class="settings" aria-label="Settings"><h2></h2><p class="brand">Codex Usage Monitor</p><hr>
+<div class="field"><label for="language"></label><select id="language"><option value="en">English</option><option value="zh-CN">简体中文</option></select></div>
+<div class="field appearance"><label for="appearance"></label><select id="appearance"><option value="auto"></option><option value="light"></option><option value="dark"></option></select></div>
+<p class="save-status"></p><button class="done"></button>
+</section></main>
+<script>
+const data={{.}};
+const $=s=>document.querySelector(s);let saved=false;
+for(const state of Object.keys(data.views.en))if(![...$('#state').options].some(o=>o.value===state))$('#state').add(new Option(state,state));
+const positions=data.layout.rows;
+for(const [key,value]of Object.entries({height:data.layout.height,rule:data.layout.rule,footer:data.layout.footer}))document.documentElement.style.setProperty('--detail-'+key,value+'px');
+function number(value,unit){return '<span class="num">'+value+'</span><span class="unit">'+(unit?' '+unit:'')+'</span>'}
+function render(){
+ const lang=$('#language').value,state=$('#state').value,v=data.views[lang][state],tr=k=>v.Labels[k]||k;
+ const p=data[$('#theme').value];for(const k of ['Strip','Panel','Text','Muted','Border','Rule'])document.documentElement.style.setProperty('--'+k.toLowerCase(),'#'+p[k].toString(16).padStart(6,'0'));
+ $('.telemetry').style.width='min('+($('#width').value==='auto'?data.layout.maxWidth:$('#width').value)+'px,100%)';
+ $('.bar .counts').textContent=v.Counts;
+ $('.rate').innerHTML=number(v.Strip[0].Value,v.Strip[0].Unit);
+ $('.usage').innerHTML=number(v.Strip[1].Value,v.Strip[1].Unit+' · '+v.Strip[2].Unit+' ')+number(v.Strip[2].Value,'');
+ $('.panel .title').textContent=tr('Current chat usage');$('.header-counts').textContent=v.Counts;
+ $('.panel .id').textContent=v.Identity||tr('Resolving the selected chat');
+ $('.rows').innerHTML=v.Rows.map((r,i)=>'<div class="row '+(i===0?'total':'')+'" style="top:'+positions[i]+'px"><span class="label">'+r.Label+'</span><span class="value">'+number(r.Value,r.Unit)+'</span></div>').join('');
+ $('.coverage').textContent=state==='loading'?tr('Loading chat history…'):v.Coverage;
+ $('.settings h2').textContent=tr('Settings');$('label[for=language]').textContent=tr('Language');$('label[for=appearance]').textContent=tr('Appearance');
+ for(const [i,key]of ['Automatic','Light','Dark'].entries())$('#appearance').options[i].textContent=tr(key);
+ $('.save-status').textContent=tr(saved?'Saved':'Changes apply immediately.');$('.done').textContent=tr('Done');$('.bar').setAttribute('aria-label',tr('Current chat usage'));
+ document.documentElement.lang=lang;
+ requestAnimationFrame(()=>{
+  const canvas=document.createElement('canvas').getContext('2d');
+  const measure=(text,size=12,weight='400')=>{canvas.font=weight+' '+size+'px Segoe,Chinese';const zoom=parseFloat(document.body.style.zoom)||1;return text?(Math.ceil(canvas.measureText(text).width*zoom)+2)/zoom:0};
+  const fit=(options,available,size=12)=>options.find(parts=>parts.reduce((n,text)=>n+measure(text,size),0)<=available);
+  if($('#width').value==='auto'){
+   let wanted=0;
+   const changedTotal=v.Choices.Right.findIndex(r=>r[0]!==v.Choices.Right[0][0]);
+   const preferred=changedTotal<0?v.Choices.Right:v.Choices.Right.slice(0,changedTotal);
+   for(const right of [preferred,v.Choices.Right]){
+    for(let width=data.layout.minWidth;width<=data.layout.maxWidth;width+=data.layout.widthStep){
+     if(fit(v.Choices.Left,width/2-8-4-1)&&fit(right,width/2-4-18-1)){wanted=width;break}
+    }
+    if(wanted)break;
+   }
+   if(!wanted)wanted=data.layout.maxWidth;
+   $('.telemetry').style.width='min('+wanted+'px,100%)';
+   $('.telemetry').dataset.measuredWidth=wanted;
+  }
+  const first=$('.first'),firstStyle=getComputedStyle(first);
+  const firstAvailable=first.clientWidth-parseFloat(firstStyle.paddingLeft)-parseFloat(firstStyle.paddingRight);
+  const second=$('.second'),style=getComputedStyle(second);
+  const available=second.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+  const left=fit(v.Choices.Left,firstAvailable-1),right=fit(v.Choices.Right,available-1);
+  $('.bar').dataset.fits=String(!!left&&!!right);
+  if(left){$('.bar .counts').textContent=left[0];$('.count-sep').textContent=left[1];$('.rate').innerHTML='<span class="num">'+left[2]+'</span><span class="unit">'+left[3]+'</span>'}
+  if(right)$('.usage').innerHTML=number(right[0],'')+'<span class="unit">'+right[1]+'</span>'+number(right[2],'');
+  const heading=$('.panel h2'),titleWidth=measure($('.panel .title').textContent,12,'600');
+  const count=fit(v.CountChoices.map(s=>[s]),heading.clientWidth-titleWidth-8-1,12);
+  heading.dataset.fits=String(!!count);if(count)$('.header-counts').textContent=count[0];
+  for(const [i,row]of [...document.querySelectorAll('.row')].entries()){
+   const option=v.RowChoices[i].find(r=>measure(r.Label,12)+12+measure(r.Value,12)+(r.Unit?measure(' '+r.Unit,12):0)<=row.clientWidth-1);
+   row.dataset.fits=String(!!option);
+   if(option){row.querySelector('.label').textContent=option.Label;row.querySelector('.value').innerHTML=number(option.Value,option.Unit)}
+  }
+  const coverage=state==='loading'?[tr('Loading chat history…')]:v.CoverageChoices;
+  const footer=fit(coverage.map(s=>[s]),$('.coverage').clientWidth-1,12);
+  $('.coverage').dataset.fits=String(!!footer);if(footer)$('.coverage').textContent=footer[0];
+ });
+}
+$('.bar').onclick=()=>{const p=$('.panel');p.hidden=!p.hidden;$('.bar').setAttribute('aria-expanded',String(!p.hidden))};
+for(const id of ['theme','state','width'])$('#'+id).onchange=render;
+$('#language').onchange=()=>{saved=true;render()};$('#appearance').onchange=()=>{saved=true;if($('#appearance').value!=='auto')$('#theme').value=$('#appearance').value;render()};
+$('.done').onclick=()=>$('.settings').hidden=true;
+addEventListener('resize',render);render();
+console.assert(25777+72704+5629===104110,'Fixture token total must reconcile');
+</script></html>
