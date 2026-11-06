@@ -120,3 +120,15 @@ jobs:
           version=$(sh build.sh --version)
           test "$(go run ./cmd/codex-usage-monitor --version)" = "Codex Usage Monitor $version"
           go run ./tools/ui-preview "$RUNNER_TEMP/codex-usage-preview/index.html"
+
+  required:
+    name: CI required
+    if: ${{ always() }}
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every platform to pass
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+        run: test "$TEST_RESULT" = success

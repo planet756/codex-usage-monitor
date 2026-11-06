@@ -139,19 +139,51 @@ func TestNativeLocatorRechecksAmbiguityOnEveryQuery(t *testing.T) {
 	if got := v.locate(nil, 1, ""); got.ID != "" || got.Reason != "uia_query_incomplete" {
 		t.Fatal("truncated native query established uniqueness")
 	}
-	selectionFixture.rows = []*comObject{b}
-	selectionFixture.document = a
-	v.documentCondition = root
-	for range 3 {
-		if got := v.locate(nil, 1, ""); got.ID != "" || got.Reason != "selected_chat_ambiguous" {
-			t.Fatal("conflicting document and row established identity")
-		}
-	}
-	selectionFixture.rows = nil
-	if got := v.locate(nil, 1, ""); got.ID != "00000000-0000-7000-8000-000000000001" {
-		t.Fatal("explicit document route did not work without a sidebar row")
-	}
 	runtime.KeepAlive(a)
 	runtime.KeepAlive(b)
 	runtime.KeepAlive(root)
+}
+
+func TestNativeDocumentRouteTakesPrecedenceAndTracksNavigation(t *testing.T) {
+	root, _ := pageFixture(t)
+	document := &comObject{&fixtureRootTable[0]}
+	selectionFixture.document = document
+	v := viewLocator{host: 1, root: root, selectedCondition: root, documentCondition: root}
+	defer v.close()
+
+	const a = "00000000-0000-7000-8000-000000000001"
+	const b = "00000000-0000-7000-8000-000000000002"
+	const route = "codex://threads/"
+	for _, tc := range []struct {
+		name, document string
+		sidebar        []string
+		id, reason     string
+	}{
+		{"document beats retained sidebar", route + a, []string{b}, a, "verified"},
+		{"document navigation refreshes identity", route + b, []string{a}, b, "verified"},
+		{"document works without sidebar", route + b, nil, b, "verified"},
+		{"new draft retires identity", "file:///app/index.html#/", []string{b}, "", "pending_chat_identity"},
+		{"document recovers after draft", route + a, []string{b}, a, "verified"},
+		{"missing document preserves ambiguity check", "", []string{a, b}, "", "selected_chat_ambiguous"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selectionFixture.urls[document] = tc.document
+			var rows []*comObject
+			for _, id := range tc.sidebar {
+				row := &comObject{&fixtureRootTable[0]}
+				selectionFixture.urls[row] = route + id
+				rows = append(rows, row)
+			}
+			selectionFixture.conditionRows[root] = rows
+			for range 3 {
+				got := v.locate(nil, 1, "")
+				if got.ID != tc.id || got.Reason != tc.reason {
+					t.Fatalf("page identity: %+v; want ID %q, reason %q", got, tc.id, tc.reason)
+				}
+				if tc.id != "" && got.Source != "uia_document_url" {
+					t.Fatalf("identity was not established by the current document: %+v", got)
+				}
+			}
+		})
+	}
 }
