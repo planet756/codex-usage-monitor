@@ -25,7 +25,7 @@ func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"success", "draft", "prerelease", "published", "moved", "missing-binary", "wrong-notes", "obsolete-draft-asset", "upload-failed"} {
+	for _, mode := range []string{"success", "draft", "prerelease", "published", "moved", "missing-binary", "missing-installer", "tampered-installer", "wrong-notes", "obsolete-draft-asset", "upload-failed"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			write := func(name string, data []byte, permission os.FileMode) {
@@ -48,6 +48,8 @@ func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 			}
 			notes := fmt.Appendf(nil, "## %s\n\n- Direct commit\n", m.Tag)
 			binary := []byte("Windows artifact fixture; never executed")
+			installer := []byte("Separate installer artifact fixture; never executed")
+			setupName := "CodexUsageMonitor-" + m.Tag + "-windows-amd64-setup.exe"
 			write("tools/release/publish.sh", script, 0o644)
 			write("dist/release-metadata/metadata.json", data, 0o644)
 			write("dist/release-metadata/CHANGELOG.md", notes, 0o644)
@@ -55,6 +57,13 @@ func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 			write("dist/windows/SHA256SUMS", fmt.Appendf(nil, "%x  CodexUsageMonitor.exe\n", sha256.Sum256(binary)), 0o644)
 			if mode != "missing-binary" {
 				write("dist/windows/CodexUsageMonitor.exe", binary, 0o644)
+			}
+			write("dist/windows-installer/SHA256SUMS", fmt.Appendf(nil, "%x  %s\n", sha256.Sum256(installer), setupName), 0o644)
+			if mode != "missing-installer" {
+				write("dist/windows-installer/"+setupName, installer, 0o644)
+			}
+			if mode == "tampered-installer" {
+				write("dist/windows-installer/"+setupName, binary, 0o644)
 			}
 			if mode == "draft" || mode == "obsolete-draft-asset" {
 				write("draft", nil, 0o644)
@@ -137,6 +146,10 @@ esac
 				if err != nil || len(entries) != 3 {
 					t.Fatalf("expected two Windows artifacts and checksums: %v %v", entries, err)
 				}
+				packagedSetup, err := os.ReadFile(filepath.Join(root, "dist/releases", setupName))
+				if err != nil || string(packagedSetup) != string(installer) {
+					t.Fatalf("release did not use the validated installer: %v", err)
+				}
 				verify := exec.Command("sha256sum", "--check", "SHA256SUMS")
 				verify.Dir = filepath.Join(root, "dist/releases")
 				if out, err := verify.CombinedOutput(); err != nil {
@@ -145,6 +158,10 @@ esac
 				archive := filepath.Join(root, "dist/releases/CodexUsageMonitor-"+m.Tag+"-windows-amd64-portable.zip")
 				if out, err := exec.Command("unzip", "-tq", archive).CombinedOutput(); err != nil {
 					t.Fatalf("portable archive: %s %v", out, err)
+				}
+				packagedBinary, err := exec.Command("unzip", "-p", archive, "CodexUsageMonitor.exe").Output()
+				if err != nil || string(packagedBinary) != string(binary) {
+					t.Fatalf("portable ZIP no longer contains the standalone app: %v", err)
 				}
 				packagedNotes, err := exec.Command("unzip", "-p", archive, "CHANGELOG.md").Output()
 				if err != nil || string(packagedNotes) != string(notes) {
@@ -158,7 +175,7 @@ esac
 					t.Fatal("failed upload did not retain the draft", err)
 				}
 			}
-			if mode == "obsolete-draft-asset" && !strings.Contains(string(out), "exactly the Windows EXE") {
+			if mode == "obsolete-draft-asset" && !strings.Contains(string(out), "exactly the Windows setup EXE") {
 				t.Fatalf("unexpected draft assets did not block publication: %s", out)
 			}
 		})

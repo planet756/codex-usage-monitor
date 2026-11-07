@@ -9,11 +9,70 @@ import (
 	"time"
 	"unsafe"
 
+	"codex-usage-monitor/internal/config"
 	"golang.org/x/sys/windows"
 )
 
 // Run on native Windows. Tests create real Shell Links only in t.TempDir,
 // without changing the user's Start menu or launching any shortcut target.
+func TestStartMenuReusesSharedEntryWithoutLosingCustomConfiguration(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("LOCALAPPDATA", d)
+	path := filepath.Join(d, "personal.lnk")
+	commonPath := filepath.Join(d, "common.lnk")
+	exe := filepath.Join(d, "monitor.exe")
+	if err := os.WriteFile(exe, []byte("fixture; never executed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := shellApartment(func() error {
+		link, persist, err := newShellLink()
+		if err != nil {
+			return err
+		}
+		defer comCall(link, 2)
+		defer comCall(persist, 2)
+		for _, field := range []struct {
+			slot  int
+			value string
+		}{{20, exe}, {9, filepath.Dir(exe)}, {11, ""}} {
+			if int32(comCall(link, field.slot, uintptr(unsafe.Pointer(utf(field.value))))) < 0 {
+				return fmt.Errorf("set shared shortcut field")
+			}
+		}
+		if int32(comCall(link, 17, uintptr(unsafe.Pointer(utf(exe))), 0)) < 0 ||
+			int32(comCall(persist, 6, uintptr(unsafe.Pointer(utf(commonPath))), 1)) < 0 {
+			return fmt.Errorf("save shared shortcut")
+		}
+		sharedBefore, err := os.ReadFile(commonPath)
+		if err != nil {
+			return err
+		}
+		if err := ensureStartMenuLink(path, exe, config.DefaultPath()); err != nil {
+			return err
+		}
+		if err := ensureStartMenuEntry(path, commonPath, exe, config.DefaultPath()); err != nil {
+			return err
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatal("shared installation left a personal shortcut shadowing the common entry", err)
+		}
+		customConfig := filepath.Join(d, "custom settings.json")
+		if err := ensureStartMenuEntry(path, commonPath, exe, customConfig); err != nil {
+			return err
+		}
+		if ok, detail := startMenuLinkStatus(path, exe, "--config "+windows.EscapeArg(customConfig)); !ok {
+			t.Fatal("custom configuration lost its personal shortcut:", detail)
+		}
+		sharedAfter, err := os.ReadFile(commonPath)
+		if err != nil || !bytes.Equal(sharedBefore, sharedAfter) {
+			t.Fatal("shared shortcut was modified", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSameShortcutPathUsesFileIdentityForAliases(t *testing.T) {
 	d := t.TempDir()
 	target := filepath.Join(d, "monitor.exe")

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"codex-usage-monitor/internal/config"
 	"codex-usage-monitor/internal/storage"
 	"golang.org/x/sys/windows"
 )
@@ -30,8 +31,8 @@ func shellApartment(action func() error) error {
 	return action()
 }
 
-// StartMenu touches only this application's current-user shortcut. It does not
-// change sign-in startup or launch Codex. Automatic registration is manual-only.
+// StartMenu owns only the current-user shortcut and reuses an installed shared
+// shortcut when it covers the same launch. Automatic registration is manual-only.
 func StartMenu(enable bool, configPath string) error {
 	return shellApartment(func() error {
 		flags := uint32(windows.KF_FLAG_DONT_VERIFY)
@@ -44,14 +45,7 @@ func StartMenu(enable bool, configPath string) error {
 		}
 		path := filepath.Join(programs, startMenuName)
 		if !enable {
-			if err := windows.DeleteFile(utf(path)); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					return nil
-				}
-				return err
-			}
-			call(shell32, "SHChangeNotify", 4, 0x2005, uintptr(unsafe.Pointer(utf(path))), 0)
-			return nil
+			return removeStartMenuLink(path)
 		}
 		exe, err := os.Executable()
 		if err != nil {
@@ -61,8 +55,34 @@ func StartMenu(enable bool, configPath string) error {
 		if err != nil {
 			return err
 		}
-		return ensureStartMenuLink(path, exe, configPath)
+		commonPath := ""
+		if common, err := windows.KnownFolderPath(windows.FOLDERID_CommonPrograms, windows.KF_FLAG_DONT_VERIFY); err == nil {
+			commonPath = filepath.Join(common, startMenuName)
+		}
+		return ensureStartMenuEntry(path, commonPath, exe, configPath)
 	})
+}
+
+func removeStartMenuLink(path string) error {
+	if err := windows.DeleteFile(utf(path)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	call(shell32, "SHChangeNotify", 4, 0x2005, uintptr(unsafe.Pointer(utf(path))), 0)
+	return nil
+}
+
+func ensureStartMenuEntry(path, commonPath, exe, configPath string) error {
+	defaultConfig, err := filepath.Abs(config.DefaultPath())
+	if err == nil && commonPath != "" && sameShortcutPath(configPath, defaultConfig) &&
+		startMenuLinkMatches(commonPath, exe, "") {
+		// A per-user link would shadow the installed shared entry, including after
+		// moving from a portable copy. Keep custom-config shortcuts user-specific.
+		return removeStartMenuLink(path)
+	}
+	return ensureStartMenuLink(path, exe, configPath)
 }
 
 func newShellLink() (*comObject, *comObject, error) {
