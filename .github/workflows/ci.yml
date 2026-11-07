@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
+    branches: [main, 'release/*']
   workflow_call:
     inputs:
       ref:
@@ -11,6 +12,11 @@ on:
         required: false
         type: string
         default: ''
+      version:
+        description: Version injected into the release build
+        required: false
+        type: string
+        default: dev
       release_validation:
         description: Protect validation for a release and retain its Windows build
         required: false
@@ -22,6 +28,8 @@ permissions:
 
 env:
   GOFLAGS: -mod=readonly
+  BUILD_VERSION: ${{ inputs.version || 'dev' }}
+  BUILD_CHANGELOG: ${{ inputs.release_validation && 'dist/release-metadata/CHANGELOG.md' || '' }}
 
 concurrency:
   group: ${{ inputs.release_validation && format('release-ci-{0}', github.run_id) || format('ci-{0}', github.event.pull_request.number || github.ref) }}
@@ -46,6 +54,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Download generated release notes
+        if: inputs.release_validation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-metadata-${{ inputs.ref }}
+          path: dist/release-metadata
       - name: Locate Go caches
         id: cache-paths
         shell: bash
@@ -100,6 +114,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: sh build.sh dist/ci
+      - name: Verify Windows binary version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $actualVersion = (& ./dist/ci/CodexUsageMonitor.exe --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actualVersion -cne "Codex Usage Monitor $env:BUILD_VERSION") {
+            throw 'EXE version mismatch'
+          }
       - name: Retain validated Windows release build
         if: runner.os == 'Windows' && inputs.release_validation
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -118,7 +140,7 @@ jobs:
           git archive HEAD | tar -x -C "$archive_dir"
           cd "$archive_dir"
           version=$(sh build.sh --version)
-          test "$(go run ./cmd/codex-usage-monitor --version)" = "Codex Usage Monitor $version"
+          test "$(go run -ldflags "-X main.version=$version" ./cmd/codex-usage-monitor --version)" = "Codex Usage Monitor $version"
           go run ./tools/ui-preview "$RUNNER_TEMP/codex-usage-preview/index.html"
 
   required:

@@ -12,7 +12,7 @@ import (
 	"codex-usage-monitor/internal/rollout"
 )
 
-var version = "0.1.0" // x-release-please-version
+var version = "dev"
 
 type options struct {
 	watcher, overlay, install, uninstall, startupStatus, stop, diagnostics bool
