@@ -13,13 +13,16 @@ jq -e --arg tag "$RELEASE_TAG" --arg sha "$RELEASE_SHA" --arg version "$RELEASE_
 actual_tag=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
 test "$actual_tag" = "$RELEASE_TAG_OBJECT"
 (cd dist/windows && sha256sum --check SHA256SUMS)
+(cd dist/windows-installer && sha256sum --check SHA256SUMS)
 cmp "$notes" dist/windows/CHANGELOG.md
 
 prefix="CodexUsageMonitor-$RELEASE_TAG"
 mkdir -p dist/releases
-cp dist/windows/CodexUsageMonitor.exe "dist/releases/$prefix-windows-amd64.exe"
+setup="$prefix-windows-amd64-setup.exe"
+test -s "dist/windows-installer/$setup"
+cp "dist/windows-installer/$setup" "dist/releases/$setup"
 (cd dist/windows && zip -qr "../releases/$prefix-windows-amd64-portable.zip" .)
-assets=("$prefix-windows-amd64.exe" "$prefix-windows-amd64-portable.zip")
+assets=("$setup" "$prefix-windows-amd64-portable.zip")
 (cd dist/releases && sha256sum "${assets[@]}" > SHA256SUMS)
 assets+=(SHA256SUMS)
 
@@ -43,9 +46,9 @@ test "$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')" = true
 actual_tag=$(gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
 test "$actual_tag" = "$RELEASE_TAG_OBJECT"
 release_status=$(gh release view "$RELEASE_TAG" --json isDraft,databaseId,assets --jq '{draft: .isDraft, id: .databaseId, assets: [.assets[].name]}')
-if ! jq -e --arg exe "$prefix-windows-amd64.exe" --arg zip "$prefix-windows-amd64-portable.zip" \
+if ! jq -e --arg exe "$setup" --arg zip "$prefix-windows-amd64-portable.zip" \
   '(.assets | sort) == ([$exe, $zip, "SHA256SUMS"] | sort)' <<< "$release_status" > /dev/null; then
-  echo 'The draft must contain exactly the Windows EXE, portable ZIP and checksums.' >&2
+  echo 'The draft must contain exactly the Windows setup EXE, portable ZIP and checksums.' >&2
   exit 1
 fi
 release_id=$(jq -er 'select(.draft == true) | .id | select(type == "number" and . > 0)' <<< "$release_status")

@@ -122,6 +122,34 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actualVersion -cne "Codex Usage Monitor $env:BUILD_VERSION") {
             throw 'EXE version mismatch'
           }
+      - name: Build and test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis.install --version=3.11.0 --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          $installer = & ./tools/release/package-windows-installer.ps1 -BuildDir dist/ci -OutputDir dist/windows-installer -Version $env:BUILD_VERSION
+          $releaseVersion = $env:BUILD_VERSION
+          try {
+            $env:BUILD_VERSION = '0.0.0-installer-test'
+            & 'C:\Program Files\Git\bin\bash.exe' build.sh dist/installer-previous
+            if ($LASTEXITCODE -ne 0) { throw 'Upgrade fixture build failed' }
+            $previousInstaller = & ./tools/release/package-windows-installer.ps1 -BuildDir dist/installer-previous -OutputDir dist/installer-previous-setup -Version $env:BUILD_VERSION
+          } finally {
+            $env:BUILD_VERSION = $releaseVersion
+          }
+          foreach ($scope in 'CurrentUser', 'AllUsers') {
+            & ./tools/release/test-windows-installer.ps1 -Installer $installer -BuildDir dist/ci -Version $env:BUILD_VERSION -PreviousInstaller $previousInstaller -PreviousBuildDir dist/installer-previous -Scope $scope
+          }
+      - name: Retain validated Windows installer
+        if: runner.os == 'Windows' && inputs.release_validation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer-${{ inputs.ref }}
+          path: dist/windows-installer/
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
       - name: Retain validated Windows release build
         if: runner.os == 'Windows' && inputs.release_validation
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

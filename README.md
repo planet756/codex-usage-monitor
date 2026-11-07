@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A portable Windows x64 usage overlay for **Codex Desktop**. It shows the current chat's usage in the title bar and expands on click. It works without focusing the composer or modifying Codex Desktop.
+A Windows x64 usage overlay for **Codex Desktop**. It shows the current chat's usage in the title bar and expands on click. It works without focusing the composer or modifying Codex Desktop.
 
 | Light | Dark |
 | :---: | :---: |
@@ -21,13 +21,13 @@ A portable Windows x64 usage overlay for **Codex Desktop**. It shows the current
 
 ## Download and use
 
-Download the standalone Windows amd64 EXE or the portable ZIP from **Releases**. Both use the same program and require no installation.
+Download the Windows amd64 **setup EXE** or **portable ZIP** from **Releases**. Setup offers installation for yourself or all users (administrator permission required), with a choice of folder. The downloaded setup EXE can be deleted after installation.
 
-1. Put the EXE in a permanent location, or extract the portable ZIP.
-2. Double-click `CodexUsageMonitor.exe` and open a chat in Codex Desktop. Either program can start first.
+1. Run Setup, or extract the portable ZIP to a permanent location.
+2. Launch from the Start menu, or open the portable `CodexUsageMonitor.exe`, then open a chat in Codex Desktop. Either program can start first.
 3. Click the overlay for details, or right-click it for **Settings**, **Status**, and **Quit**.
 
-The first manual launch creates a Start menu shortcut for the current user and enables startup by default. You can disable startup from the overlay's right-click menu. Administrator rights are not required. After Quit, restart from the Start menu or EXE. If you move the portable folder, run the EXE from its new location once to update the shortcut.
+The first manual launch enables startup for the current user by default; you can disable it from the overlay's right-click menu. Running the app requires no administrator rights. After Quit, restart from the Start menu or EXE. If you move the portable folder, run the EXE from its new location once to update the shortcut.
 
 ## Metrics
 
