@@ -109,6 +109,7 @@ function Start-Watcher {
 }
 
 try {
+    Write-Host "Installer smoke checks: $Scope"
     New-Item -ItemType Directory -Force -Path $testProfile | Out-Null
     # Exercise the default for a first install, without /D or a precreated target.
     Invoke-Setup $installerPath -DefaultDirectory
@@ -143,7 +144,9 @@ try {
         $entry -and $entry.CodexUsageMonitor.StartsWith('"' + $installed + '" ', [StringComparison]::OrdinalIgnoreCase)
     } 'Startup does not point to the installed application'
 
-    & $installed --add-start-menu --config $config
+    # A GUI-subsystem EXE runs asynchronously at the end of a PowerShell pipeline.
+    # Pipe one-shot commands so they finish and update LASTEXITCODE before assertions.
+    & $installed --add-start-menu --config $config | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Manual shortcut registration failed' }
     if ($Scope -eq 'AllUsers' -and (Test-Path -LiteralPath $personalShortcut)) {
         throw 'All-users installation created a personal shortcut shadowing the common entry'
@@ -159,18 +162,28 @@ try {
     Assert-Version $payload "Codex Usage Monitor $Version"
     if ((Get-FileHash $config).Hash -cne $savedSettings) { throw 'Upgrade replaced user settings' }
 
-    & $installed --uninstall-startup
+    & $installed --uninstall-startup | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not set startup opt-out' }
+    $settings = Get-Content -Raw -LiteralPath $config | ConvertFrom-Json
+    if ($settings.start_with_windows -ne $false -or
+        (Get-ItemProperty -LiteralPath $runKey -Name CodexUsageMonitor -ErrorAction SilentlyContinue)) {
+        throw "Startup opt-out was not established before reinstallation ($Scope)"
+    }
     $savedSettings = (Get-FileHash $config).Hash
     Invoke-Setup $installerPath
     $watcher = Start-Watcher
     Wait-Until { Test-Path -LiteralPath $config } 'Settings missing after reinstallation'
-    if ($watcher.HasExited -or (Get-FileHash $config).Hash -cne $savedSettings -or
-        (Get-ItemProperty -LiteralPath $runKey -Name CodexUsageMonitor -ErrorAction SilentlyContinue)) {
-        throw 'Reinstallation lost the startup opt-out'
+    if ($watcher.HasExited) {
+        throw "Watcher exited after reinstallation ($Scope), exit code $($watcher.ExitCode)"
+    }
+    if ((Get-FileHash $config).Hash -cne $savedSettings) {
+        throw "Reinstallation changed saved settings ($Scope)"
+    }
+    if (Get-ItemProperty -LiteralPath $runKey -Name CodexUsageMonitor -ErrorAction SilentlyContinue) {
+        throw "Reinstallation restored startup registration after opt-out ($Scope)"
     }
 
-    & $installed --install-startup
+    & $installed --install-startup | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not restore startup for uninstall test' }
     $savedSettings = (Get-FileHash $config).Hash
     $userFile = Join-Path $installDir 'user-note.txt'
@@ -194,7 +207,7 @@ finally {
         } catch { Write-Warning "Test cleanup failed: $_" }
     }
     if ($watcher -and !$watcher.HasExited) {
-        if (Test-Path -LiteralPath $installed) { & $installed --stop }
+        if (Test-Path -LiteralPath $installed) { & $installed --stop | Out-Null }
         if (!$watcher.WaitForExit(15000)) { $watcher.Kill() }
     }
     $env:LOCALAPPDATA = $oldLocalAppData
