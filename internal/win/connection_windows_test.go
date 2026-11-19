@@ -95,7 +95,7 @@ func TestNativeIdleNavigationDiscoversOwnerAndFollowsOnlyThatOwner(t *testing.T)
 	if len(follow.Targets) != 1 || follow.Targets[0] != "verified-owner" {
 		t.Fatal("snapshot was not requested from the verified owner")
 	}
-	write(map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "version": 11, "sourceClientId": "verified-owner", "targetClientIds": []string{"monitor"},
+	write(map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "version": 13, "sourceClientId": "verified-owner", "targetClientIds": []string{"monitor"},
 		"params": map[string]any{"conversationId": id, "hostId": "local", "change": map[string]any{"type": "snapshot", "revision": 1, "conversationState": map[string]string{"rolloutPath": `C:\data\selected.jsonl`}}}})
 	for {
 		select {

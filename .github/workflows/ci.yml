@@ -13,12 +13,12 @@ on:
         type: string
         default: ''
       version:
-        description: Version injected into the release build
+        description: Version injected into the native release builds
         required: false
         type: string
         default: dev
       release_validation:
-        description: Protect validation for a release and retain its Windows build
+        description: Protect release validation and retain the native builds
         required: false
         type: boolean
         default: false
@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025]
+        os: [ubuntu-24.04, windows-2025, macos-15]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -79,16 +79,14 @@ jobs:
           path: ${{ steps.cache-paths.outputs.build }}
           key: gobuild-${{ matrix.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.mod', 'go.sum', '**/*.go', 'build.sh', 'tools/ui-preview/preview.html') }}
           restore-keys: gobuild-${{ matrix.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-
-      - name: Reject tracked private files and build outputs
+      - name: Check tracked files against the public source rules
         shell: bash
         run: |
-          while IFS= read -r -d '' file; do
-            case "$file" in
-              dist/*|diagnostics/*|docs/*|.agents/*|.aws/*|.codex/*|.secrets/*|.env*|*/.env*|*/.secrets/*|settings.json|overlay-status.json|*.exe|*.test|*.jsonl|*.log|*.sqlite|*.db|*.prof)
-                printf 'Remove private or generated file from Git: %s\n' "$file"
-                exit 1 ;;
-            esac
-          done < <(git ls-files -z)
+          excluded=$(git ls-files --cached --ignored --exclude-from=.gitignore)
+          if [[ -n "$excluded" ]]; then
+            printf 'Tracked paths excluded by .gitignore:\n%s\n' "$excluded"
+            exit 1
+          fi
       - name: Check Go formatting
         shell: bash
         run: |
@@ -147,6 +145,32 @@ jobs:
         with:
           name: windows-installer-${{ inputs.ref }}
           path: dist/windows-installer/
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+      - name: macOS native tests and static checks
+        if: runner.os == 'macOS'
+        run: |
+          go test -race -count=1 ./...
+          go vet -unsafeptr=false ./...
+      - name: Build and verify native macOS DMG
+        if: runner.os == 'macOS'
+        run: |
+          test "$(go env GOARCH)" = arm64
+          sh build.sh dist/mac-ci darwin arm64
+          app='dist/mac-ci/Codex Usage Monitor.app'
+          test "$("$app/Contents/MacOS/CodexUsageMonitor" --version)" = "Codex Usage Monitor $(sh build.sh --version)"
+          plutil -lint "$app/Contents/Info.plist"
+          (cd dist/mac-ci && shasum -a 256 --check SHA256SUMS)
+          (cd dist/mac-ci && shasum -a 256 CodexUsageMonitor-*-macos-arm64.dmg > DMG-SHA256SUMS)
+      - name: Retain macOS build
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-arm64-${{ inputs.ref || github.sha }}
+          path: |
+            dist/mac-ci/CodexUsageMonitor-*-macos-arm64.dmg
+            dist/mac-ci/DMG-SHA256SUMS
           if-no-files-found: error
           retention-days: 30
           overwrite: true

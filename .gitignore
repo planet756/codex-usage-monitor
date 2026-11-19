@@ -1,21 +1,60 @@
-/dist/
-/diagnostics/
-/docs/
-/.agents/
-/.aws/
-/.codex/
-/.playwright-cli/
-/.secrets/
-/.env
-/.env.*
-/settings.json
-/overlay-status.json
-AGENTS.md
-*.test
-*.exe
-coverage.out
-*.prof
-*.jsonl
-*.log
-*.sqlite
-*.db
+# Public source archive. Add a scoped exception when a new build input is needed.
+*
+
+# Go module, build entry point and public documentation.
+!/go.mod
+!/go.sum
+!/build.sh
+!/README.md
+!/README.zh-CN.md
+!/CHANGELOG.md
+!/LICENSE
+!/THIRD-PARTY-NOTICES.md
+!/LICENSES/
+!/LICENSES/*.txt
+
+# Reopen package directories so new Go source and tests are visible to Git.
+!/cmd/
+!/cmd/**/
+!/cmd/**/*.go
+!/internal/
+!/internal/**/
+!/internal/**/*.go
+# Go's generated fuzz regression inputs have extensionless names.
+!/internal/**/testdata/fuzz/Fuzz*/*
+/internal/**/testdata/fuzz/Fuzz*/*.*
+
+# Maintained build, release and preview tools, including the go:embed input.
+!/tools/
+!/tools/verify-macos.sh
+!/tools/release/
+!/tools/release/*.go
+!/tools/release/*.sh
+!/tools/release/*.ps1
+!/tools/release/*.nsi
+!/tools/ui-preview/
+!/tools/ui-preview/*.go
+!/tools/ui-preview/preview.html
+
+# Only the images referenced by the public READMEs.
+!/assets/
+!/assets/usage-en-light.png
+!/assets/usage-en-dark.png
+!/assets/usage-zh-light.png
+!/assets/usage-zh-dark.png
+
+# Repository automation.
+!/.github/workflows/
+!/.github/workflows/*.yml
+!/.github/workflows/*.yaml
+
+# Keep build bundles and local dotfiles private even inside open package trees.
+dist/
+diagnostics/
+*.app/
+*.dSYM/
+node_modules/
+.*
+!/.github/
+!/.gitattributes
+!/.gitignore

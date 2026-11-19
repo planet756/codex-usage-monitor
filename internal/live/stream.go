@@ -101,7 +101,7 @@ func (s *Stream) Apply(f *ipc.Frame) (changed, snapshot bool) {
 		s.discovering = true
 		return true, false
 	}
-	if f.Version != 11 {
+	if !ipc.SupportsThreadStreamVersion(f.Version) {
 		s.invalidate()
 		s.view.Unsupported = true
 		return true, false

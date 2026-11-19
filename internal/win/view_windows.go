@@ -10,19 +10,13 @@ import (
 	"unsafe"
 
 	"codex-usage-monitor/internal/ipc"
+	"codex-usage-monitor/internal/monitor"
 	popupstate "codex-usage-monitor/internal/popup"
 	"codex-usage-monitor/internal/source"
 	"golang.org/x/sys/windows"
 )
 
-type viewSelection struct {
-	Window                   uintptr
-	ChatPage                 bool
-	ID, Host, Source, Reason string
-	SelectedElements         int
-	PageEvidenceRequired     bool
-	HeaderProbe              [3]int // Matching Chat scopes, title controls, unique catalog matches.
-}
+type viewSelection = monitor.View
 
 type viewRequest struct {
 	Window    uintptr

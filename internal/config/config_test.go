@@ -75,3 +75,21 @@ func TestUnknownSettingsAreRejectedWithoutMigration(t *testing.T) {
 		t.Fatal("invalid settings were rewritten")
 	}
 }
+
+func TestMacLoginOptOutSurvivesUIUpdates(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	c := Default()
+	off := false
+	c.StartAtLogin = &off
+	c.CodexHome = "/Users/test/AI Data"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpdateUI(p, "zh-CN", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p)
+	if err != nil || got.StartAtLogin == nil || *got.StartAtLogin || got.CodexHome != c.CodexHome || got.StartWithWindows != c.StartWithWindows {
+		t.Fatalf("startup/data settings changed: %+v %v", got, err)
+	}
+}
