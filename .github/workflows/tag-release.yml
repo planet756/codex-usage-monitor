@@ -97,6 +97,10 @@ jobs:
         with:
           name: windows-installer-${{ needs.prepare.outputs.sha }}
           path: dist/windows-installer
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: macos-arm64-${{ needs.prepare.outputs.sha }}
+          path: dist/macos
       - name: Verify artifacts and publish release
         shell: bash
         run: bash tools/release/publish.sh

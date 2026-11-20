@@ -15,6 +15,7 @@ type Config struct {
 	Language         string `json:"language"`
 	Theme            string `json:"theme"`
 	StartWithWindows bool   `json:"start_with_windows"`
+	StartAtLogin     *bool  `json:"start_at_login,omitempty"`
 }
 
 func Default() Config {

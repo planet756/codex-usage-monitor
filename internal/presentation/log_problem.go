@@ -13,7 +13,7 @@ import (
 func LogProblem(err error) string {
 	switch {
 	case errors.Is(err, source.ErrHostUnsupported):
-		return "Current chat log is not on this Windows host"
+		return "Current chat log is not on this computer"
 	case errors.Is(err, rollout.ErrBranchUnverified):
 		return "Waiting for Desktop current history branch"
 	case errors.Is(err, rollout.ErrArchiveInvalid):
@@ -45,7 +45,7 @@ func LogProblem(err error) string {
 	case errors.Is(err, rollout.ErrLogSearchIncomplete):
 		return "Chat log search incomplete · check access"
 	case errors.Is(err, rollout.ErrLogPathUnsupported):
-		return "Chat log path is not Windows-readable"
+		return "Chat log path is not readable on this computer"
 	case errors.Is(err, rollout.ErrLogNotFound), errors.Is(err, os.ErrNotExist):
 		return "Current chat log not found · retrying"
 	case errors.Is(err, rollout.ErrLogUnreadable), errors.Is(err, os.ErrPermission):
