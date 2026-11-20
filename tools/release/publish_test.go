@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
+func TestPublishNativeDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the publish job runs on Linux")
 	}
@@ -25,7 +25,7 @@ func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"success", "draft", "prerelease", "published", "moved", "missing-binary", "missing-installer", "tampered-installer", "wrong-notes", "obsolete-draft-asset", "upload-failed"} {
+	for _, mode := range []string{"success", "draft", "prerelease", "published", "moved", "missing-binary", "missing-installer", "tampered-installer", "missing-dmg", "tampered-dmg", "wrong-dmg-version", "wrong-notes", "obsolete-draft-asset", "upload-failed"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			write := func(name string, data []byte, permission os.FileMode) {
@@ -50,6 +50,11 @@ func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 			binary := []byte("Windows artifact fixture; never executed")
 			installer := []byte("Separate installer artifact fixture; never executed")
 			setupName := "CodexUsageMonitor-" + m.Tag + "-windows-amd64-setup.exe"
+			dmg := []byte("Native macOS DMG artifact fixture; never mounted")
+			dmgName := "CodexUsageMonitor-" + m.Tag + "-macos-arm64.dmg"
+			if mode == "wrong-dmg-version" {
+				dmgName = "CodexUsageMonitor-v0.9.0-macos-arm64.dmg"
+			}
 			write("tools/release/publish.sh", script, 0o644)
 			write("dist/release-metadata/metadata.json", data, 0o644)
 			write("dist/release-metadata/CHANGELOG.md", notes, 0o644)
@@ -64,6 +69,13 @@ func TestPublishWindowsDraftAndRejectsChangedOrIncompleteRelease(t *testing.T) {
 			}
 			if mode == "tampered-installer" {
 				write("dist/windows-installer/"+setupName, binary, 0o644)
+			}
+			write("dist/macos/DMG-SHA256SUMS", fmt.Appendf(nil, "%x  %s\n", sha256.Sum256(dmg), dmgName), 0o644)
+			if mode != "missing-dmg" {
+				write("dist/macos/"+dmgName, dmg, 0o644)
+			}
+			if mode == "tampered-dmg" {
+				write("dist/macos/"+dmgName, binary, 0o644)
 			}
 			if mode == "draft" || mode == "obsolete-draft-asset" {
 				write("draft", nil, 0o644)
@@ -143,12 +155,16 @@ esac
 					t.Fatalf("publish: %v, marker: %v\n%s", err, publishedErr, out)
 				}
 				entries, err := os.ReadDir(filepath.Join(root, "dist/releases"))
-				if err != nil || len(entries) != 3 {
-					t.Fatalf("expected two Windows artifacts and checksums: %v %v", entries, err)
+				if err != nil || len(entries) != 4 {
+					t.Fatalf("expected Windows setup, portable ZIP, macOS DMG and checksums: %v %v", entries, err)
 				}
 				packagedSetup, err := os.ReadFile(filepath.Join(root, "dist/releases", setupName))
 				if err != nil || string(packagedSetup) != string(installer) {
 					t.Fatalf("release did not use the validated installer: %v", err)
+				}
+				packagedDMG, err := os.ReadFile(filepath.Join(root, "dist/releases", dmgName))
+				if err != nil || string(packagedDMG) != string(dmg) {
+					t.Fatalf("release did not use the native macOS DMG: %v", err)
 				}
 				verify := exec.Command("sha256sum", "--check", "SHA256SUMS")
 				verify.Dir = filepath.Join(root, "dist/releases")

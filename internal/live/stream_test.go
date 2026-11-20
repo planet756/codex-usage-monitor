@@ -11,8 +11,8 @@ import (
 const chatA = "01a159db-a637-7512-8d64-06de0e0e785b"
 const chatB = "01a15da4-16e9-7951-8fce-50f7bef8bb83"
 
-func wire(id string, change map[string]any) []byte {
-	b, _ := json.Marshal(map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "sourceClientId": "owner", "version": 11, "targetClientIds": []string{"monitor"}, "params": map[string]any{"conversationId": id, "hostId": "local", "change": change}})
+func wire(version int, id string, change map[string]any) []byte {
+	b, _ := json.Marshal(map[string]any{"type": "broadcast", "method": "thread-stream-state-changed", "sourceClientId": "owner", "version": version, "targetClientIds": []string{"monitor"}, "params": map[string]any{"conversationId": id, "hostId": "local", "change": change}})
 	return b
 }
 func parseFrame(b []byte) *ipc.Frame {
@@ -23,10 +23,10 @@ func parseFrame(b []byte) *ipc.Frame {
 	return f
 }
 func branchSnapshot(rev int64, path any) []byte {
-	return wire(chatA, map[string]any{"type": "snapshot", "revision": rev, "conversationState": map[string]any{"rolloutPath": path}})
+	return wire(13, chatA, map[string]any{"type": "snapshot", "revision": rev, "conversationState": map[string]any{"rolloutPath": path}})
 }
 func branchPatch(base, rev int64, op string, path []any, value any) []byte {
-	return wire(chatA, map[string]any{"type": "patches", "baseRevision": base, "revision": rev, "patches": []any{map[string]any{"op": op, "path": path, "value": value}}})
+	return wire(13, chatA, map[string]any{"type": "patches", "baseRevision": base, "revision": rev, "patches": []any{map[string]any{"op": op, "path": path, "value": value}}})
 }
 func discover(t *testing.T, s *Stream, owner string) {
 	t.Helper()
@@ -43,6 +43,39 @@ func ready(t *testing.T) *Stream {
 	discover(t, s, "owner")
 	return s
 }
+
+func TestSourceMetadataVersions(t *testing.T) {
+	for _, version := range []int{11, 13} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			s := ready(t)
+			s.Apply(parseFrame(wire(version, chatA, map[string]any{"type": "snapshot", "revision": 1, "conversationState": map[string]any{"rolloutPath": "selected.jsonl"}})))
+			if !s.View().Available || s.View().Unsupported || !s.View().OwnerVerified || s.View().RolloutPath != "selected.jsonl" {
+				t.Fatalf("supported snapshot rejected: %+v", s.View())
+			}
+			s.Apply(parseFrame(wire(version, chatA, map[string]any{
+				"type": "patches", "baseRevision": 1, "revision": 2,
+				"patches":             []any{map[string]any{"op": "replace", "path": []string{"rolloutPath"}, "value": "updated.jsonl"}},
+				"acceptedTextChanges": []any{map[string]any{"text": "ignored text"}},
+			})))
+			if s.View().RolloutPath != "updated.jsonl" || s.View().Revision != 2 || s.View().Frames != 2 {
+				t.Fatalf("supported delta rejected: %+v", s.View())
+			}
+			for _, unknown := range []int{12, 14} {
+				f := parseFrame(wire(unknown, chatA, map[string]any{"type": "snapshot", "revision": 3, "conversationState": map[string]any{"rolloutPath": "unverified.jsonl"}}))
+				s.Apply(f)
+				if !s.View().Unsupported || s.View().Available || s.View().RolloutPath != "" || s.NeedsResync() {
+					t.Fatalf("unverified version %d retained source: %+v", unknown, s.View())
+				}
+				f.Version = version
+				s.Apply(f)
+				if s.View().Unsupported || !s.View().Available || s.View().RolloutPath != "unverified.jsonl" {
+					t.Fatalf("supported snapshot did not recover: %+v", s.View())
+				}
+			}
+		})
+	}
+}
+
 func TestSourceRevisionAndExplicitPathChanges(t *testing.T) {
 	s := ready(t)
 	s.Apply(parseFrame(branchSnapshot(1, "old.jsonl")))

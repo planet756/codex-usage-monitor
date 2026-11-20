@@ -1,4 +1,4 @@
-// Package source translates Desktop's explicit file identity into a Windows
+// Package source translates Desktop's explicit file identity into a local
 // path. It performs no host discovery, filesystem search, or process launch.
 package source
 
@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	ErrUnsupported     = errors.New("unsupported Windows source path")
-	ErrHostUnsupported = errors.New("current chat source is not on this Windows host")
+	ErrUnsupported     = errors.New("unsupported local source path")
+	ErrHostUnsupported = errors.New("current chat source is not on this host")
 )
 
 type Options struct{ Home, Host string }

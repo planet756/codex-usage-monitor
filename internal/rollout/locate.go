@@ -25,7 +25,7 @@ var (
 	ErrLogPending            = errors.New("chat log header incomplete")
 	ErrLogSearchIncomplete   = errors.New("chat log search incomplete")
 	ErrLogUnreadable         = errors.New("chat log unreadable")
-	ErrLogPathUnsupported    = errors.New("chat log path is not Windows-readable")
+	ErrLogPathUnsupported    = errors.New("chat log path is not readable on this host")
 	ErrHistoryMissing        = errors.New("referenced history missing")
 	ErrHistoryBoundary       = errors.New("history reference boundary invalid")
 	ErrHistoryCycle          = errors.New("history reference cycle or depth exceeded")

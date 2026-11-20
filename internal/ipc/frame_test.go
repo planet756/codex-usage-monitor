@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -56,15 +57,19 @@ func TestProjectionArrayEscapesNestedValuesAndLimits(t *testing.T) {
 }
 
 func TestSourceSchemaRejectsUnknownChangesAndOperationsAtDecodeBoundary(t *testing.T) {
-	for _, change := range []string{
-		`{"type":"unknown","revision":1}`,
-		`{"type":"snapshot","revision":-1}`,
-		`{"type":"patches","baseRevision":2,"revision":1}`,
-		`{"type":"patches","baseRevision":1,"revision":2,"patches":[{"op":"move","path":["rolloutPath"]}]}`,
-	} {
-		body := `{"type":"broadcast","method":"thread-stream-state-changed","version":11,"params":{"change":` + change + `}}`
-		if _, err := Decode([]byte(body)); !errors.Is(err, ErrFrameSkipped) {
-			t.Fatal("unvalidated source change entered the stream", err)
-		}
+	for _, version := range []int{11, 13} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			for _, change := range []string{
+				`{"type":"unknown","revision":1}`,
+				`{"type":"snapshot","revision":-1}`,
+				`{"type":"patches","baseRevision":2,"revision":1}`,
+				`{"type":"patches","baseRevision":1,"revision":2,"patches":[{"op":"move","path":["rolloutPath"]}]}`,
+			} {
+				body := fmt.Sprintf(`{"type":"broadcast","method":"thread-stream-state-changed","version":%d,"params":{"change":%s}}`, version, change)
+				if _, err := Decode([]byte(body)); !errors.Is(err, ErrFrameSkipped) {
+					t.Fatal("unvalidated source change entered the stream", err)
+				}
+			}
+		})
 	}
 }

@@ -116,6 +116,11 @@ type Frame struct {
 	} `json:"params"`
 }
 
+// Versions 11 and 13 share the revisioned rolloutPath metadata we consume.
+func SupportsThreadStreamVersion(version int) bool {
+	return version == 11 || version == 13
+}
+
 // Decode projects a wire frame once; arbitrary message and tool text is skipped.
 func Decode(b []byte) (*Frame, error) {
 	var f Frame
@@ -135,7 +140,7 @@ func Decode(b []byte) (*Frame, error) {
 			return nil, ErrFrameSkipped
 		}
 	}
-	if f.Type == "broadcast" && f.Method == "thread-stream-state-changed" && f.Version == 11 {
+	if f.Type == "broadcast" && f.Method == "thread-stream-state-changed" && SupportsThreadStreamVersion(f.Version) {
 		c := f.Params.Change
 		if c.Type != "snapshot" && c.Type != "patches" || c.Revision < 0 || c.Base < 0 || c.Type == "patches" && c.Revision <= c.Base {
 			return nil, ErrFrameSkipped

@@ -11,7 +11,7 @@ import (
 )
 
 func sourceSnapshot(body string) string {
-	return `{"type":"broadcast","method":"thread-stream-state-changed","sourceClientId":"owner","version":11,"targetClientIds":["monitor"],"params":{"conversationId":"01a1695c-c599-7d43-8e01-b207f5a74431","hostId":"local","change":{"type":"snapshot","revision":31,"conversationState":{` + body + `}}}}`
+	return `{"type":"broadcast","method":"thread-stream-state-changed","sourceClientId":"owner","version":13,"targetClientIds":["monitor"],"params":{"conversationId":"01a1695c-c599-7d43-8e01-b207f5a74431","hostId":"local","change":{"type":"snapshot","revision":31,"conversationState":{` + body + `}}}}`
 }
 
 func TestLargeSnapshotKeepsOnlyVerifiedSourceMetadataAndNextFrame(t *testing.T) {
@@ -77,7 +77,7 @@ func TestStreamingProjectionValidatesIgnoredJSONAndDrainsFailures(t *testing.T) 
 }
 
 func TestLargePatchKeepsRoutingForSourceRecoveryAndNextFrame(t *testing.T) {
-	body := `{"type":"broadcast","method":"thread-stream-state-changed","sourceClientId":"owner","version":11,"params":{"conversationId":"` + id1 + `","hostId":"local","change":{"type":"patches","baseRevision":30,"revision":31,"patches":[{"op":"replace","path":["turns",0,"text"],"value":"` + strings.Repeat("x", MaxFrame) + `"},{"op":"replace","path":["rolloutPath"],"value":"new.jsonl"}]}}}`
+	body := `{"type":"broadcast","method":"thread-stream-state-changed","sourceClientId":"owner","version":13,"params":{"conversationId":"` + id1 + `","hostId":"local","change":{"type":"patches","baseRevision":30,"revision":31,"patches":[{"op":"replace","path":["turns",0,"text"],"value":"` + strings.Repeat("x", MaxFrame) + `"},{"op":"replace","path":["rolloutPath"],"value":"new.jsonl"}]}}}`
 	var wire bytes.Buffer
 	var prefix [4]byte
 	binary.LittleEndian.PutUint32(prefix[:], uint32(len(body)))

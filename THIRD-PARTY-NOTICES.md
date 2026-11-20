@@ -24,7 +24,13 @@ BSD-style license, included in `LICENSES/golang-x-sys-BSD.txt`.
 Its license is included in `LICENSES/klauspost-compress-LICENSE.txt`.
 No separate decoder executable or native compression DLL is required.
 
+The macOS adapter uses `github.com/ebitengine/purego` v0.11.2 to call AppKit,
+Accessibility, Core Foundation and the system SQLite library without CGO.
+Purego is distributed under Apache-2.0; its copied Go runtime portions retain
+the Go project's BSD-style license. Both texts are included in `LICENSES/`.
+
 Microsoft Windows system APIs and system libraries are dynamically loaded from
-Windows, not redistributed. Codex is a trademark of OpenAI. This companion is
+Windows, not redistributed. Apple frameworks and SQLite are loaded from macOS
+and are not redistributed either. Codex is a trademark of OpenAI. This companion is
 independent of OpenAI. Desktop's IPC and persisted-record formats are internal
 implementation details and require compatibility checks after client updates.
