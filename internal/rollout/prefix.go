@@ -72,7 +72,7 @@ func (r *Reader) acceptsPrefix(c checkpoint) bool {
 	}
 	for i, old := range c.Plan.Segments {
 		now := r.history.Segments[i]
-		if !sameRepresentationPath(old.Path, now.Path) || c.Parts[i].Path != old.Path || old.Header != now.Header || old.LogicalID != now.LogicalID || old.StartOrdinal != now.StartOrdinal || c.Parts[i].Limit != old.Bytes || old.AlternatePath != now.AlternatePath || !reflect.DeepEqual(old.Alternate, now.Alternate) {
+		if !SameRepresentationPath(old.Path, now.Path) || c.Parts[i].Path != old.Path || old.Header != now.Header || old.LogicalID != now.LogicalID || old.StartOrdinal != now.StartOrdinal || c.Parts[i].Limit != old.Bytes || old.AlternatePath != now.AlternatePath || !reflect.DeepEqual(old.Alternate, now.Alternate) {
 			return false
 		}
 		if i < len(c.Parts)-1 && (old.Bytes != now.Bytes || old.EndOrdinal != now.EndOrdinal) {
@@ -85,7 +85,8 @@ func (r *Reader) acceptsPrefix(c checkpoint) bool {
 	return c.Offset > 0
 }
 
-func sameRepresentationPath(a, b string) bool {
+// SameRepresentationPath matches the plain and compressed names of a rollout.
+func SameRepresentationPath(a, b string) bool {
 	return plainArchivePath(a) == plainArchivePath(b)
 }
 

@@ -13,6 +13,7 @@ import (
 	"codex-usage-monitor/internal/monitor"
 	"codex-usage-monitor/internal/popup"
 	"codex-usage-monitor/internal/presentation"
+	"codex-usage-monitor/internal/releasecheck"
 	"codex-usage-monitor/internal/source"
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
@@ -22,6 +23,8 @@ import (
 type overlay struct {
 	pid                                                         uint32
 	configPath, version                                         string
+	ctx                                                         context.Context
+	releaseCheck                                                *releasecheck.Job
 	cfg                                                         config.Config
 	window, strip, delegate, settings, language, theme, startup objc.ID
 	labels                                                      []objc.ID
@@ -121,7 +124,7 @@ func RunOverlay(pid uint32, configPath, version string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), unix.SIGTERM, unix.SIGINT)
 	defer cancel()
-	a := &overlay{pid: pid, cfg: cfg, configPath: configPath, version: version, requests: make(chan uint64, 1), results: make(chan observation, 1)}
+	a := &overlay{pid: pid, cfg: cfg, configPath: configPath, version: version, ctx: ctx, requests: make(chan uint64, 1), results: make(chan observation, 1)}
 	a.observerState.api = darwinObserver{pid: pid}
 	activeOverlay = a
 	defer func() { activeOverlay = nil }()
@@ -129,6 +132,7 @@ func RunOverlay(pid uint32, configPath, version string) error {
 		return err
 	}
 	defer a.close()
+	defer func() { a.releaseCheck.Close() }()
 	views := make(chan monitor.View, 1)
 	updates := make(chan monitor.Update, 1)
 	engineDone, viewDone := make(chan struct{}), make(chan struct{})
@@ -139,7 +143,9 @@ func RunOverlay(pid uint32, configPath, version string) error {
 			case updates <- u:
 			case <-ctx.Done():
 			}
-		}, monitor.Dependencies{Dial: dialIPC(home), Watch: watchDirectory, Resolve: source.ResolvePOSIX})
+		}, monitor.Dependencies{
+			Dial: dialIPC(home), IndexedPath: indexedRolloutPath, Watch: watchDirectory, Resolve: source.ResolvePOSIX,
+		})
 	}()
 	go func() { defer close(viewDone); probeWorker(ctx, pid, home, a.requests, a.results) }()
 	defer func() {
@@ -207,6 +213,7 @@ func RunOverlay(pid uint32, configPath, version string) error {
 			}
 		default:
 		}
+		a.finishReleaseCheck()
 		if time.Since(a.lastProbe) >= 500*time.Millisecond {
 			a.observerState.update(0, time.Now())
 			a.requestProbe()
@@ -438,7 +445,14 @@ func (a *overlay) showMenu(view, event objc.ID) {
 	menu := newObject("NSMenu")
 	defer menu.Send(sel("release"))
 	menu.Send(sel("setAutoenablesItems:"), false)
-	for i, title := range []string{"Settings", "Status", "Quit"} {
+	updateLabel := "Check for Updates…"
+	if a.releaseCheck != nil {
+		updateLabel = "Checking for Updates…"
+	}
+	for i, title := range []string{"Settings", "Status", updateLabel, "Project Homepage", "Quit"} {
+		if i == 2 || i == 4 {
+			menu.Send(sel("addItem:"), objc.ID(objc.GetClass("NSMenuItem")).Send(sel("separatorItem")))
+		}
 		item := objc.ID(objc.GetClass("NSMenuItem")).Send(sel("alloc")).Send(sel("initWithTitle:action:keyEquivalent:"), ns(i18n.Text(a.cfg.Language, title)), sel("menu:"), ns(""))
 		item.Send(sel("setTarget:"), a.delegate)
 		item.Send(sel("setTag:"), int64(i+1))
@@ -454,6 +468,12 @@ func (a *overlay) action(tag int) {
 	case 2:
 		showAlert("Codex Usage Monitor "+a.version, fmt.Sprintf("Desktop PID: %d\nAccessibility: %t\nIPC connected: %t\nCurrent page verified: %t\nHistory branch verified: %t\nAX nodes checked: %d", a.pid, native.axTrusted(), a.data.Connected, a.view.ID != "", a.data.BranchVerified, a.observed.Nodes))
 	case 3:
+		if a.releaseCheck == nil {
+			a.releaseCheck = releasecheck.Start(a.ctx, a.version, nil)
+		}
+	case 4:
+		a.openProjectPage(releasecheck.ProjectURL)
+	case 5:
 		if err := Stop(a.configPath); err != nil {
 			showAlert("Quit", err.Error())
 		}

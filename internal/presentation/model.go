@@ -28,7 +28,7 @@ func Display(s metrics.Snapshot, language, id, message string, loading, unsuppor
 		} else if message != "" {
 			m.Coverage = message
 		}
-		if unsupported {
+		if unsupported && !loading && message == "" && !s.HasCounts && !s.HasUsage {
 			m.Coverage = "Desktop protocol unsupported"
 		}
 	}

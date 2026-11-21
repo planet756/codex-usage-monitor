@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"codex-usage-monitor/internal/semver"
 )
 
 type publishedRelease struct {
@@ -119,7 +121,7 @@ func prepare(root, tag, eventSHA, repo string, releases []publishedRelease) (met
 
 func prepareHistory(history releaseHistory, tag, eventSHA, repo string, releases []publishedRelease) (metadata, string, error) {
 	var m metadata
-	version, err := parseVersionTag(tag)
+	version, err := semver.ParseTag(tag)
 	if err != nil {
 		return m, "", err
 	}
@@ -149,7 +151,7 @@ func prepareHistory(history releaseHistory, tag, eventSHA, repo string, releases
 	if err != nil {
 		return m, "", err
 	}
-	m = metadata{Tag: tag, Version: strings.TrimPrefix(tag, "v"), SHA: sha, TagObject: object, Prerelease: len(version.pre) != 0}
+	m = metadata{Tag: tag, Version: strings.TrimPrefix(tag, "v"), SHA: sha, TagObject: object, Prerelease: version.IsPrerelease()}
 	m.PreviousTag, err = previousRelease(tag, version, releases)
 	if err != nil {
 		return m, "", err

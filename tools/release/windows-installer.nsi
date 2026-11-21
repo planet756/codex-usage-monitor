@@ -355,6 +355,7 @@ FunctionEnd
   !insertmacro PayloadFile ${MODE} "\LICENSES" "codex-statusbar-MIT.txt"
   !insertmacro PayloadFile ${MODE} "\LICENSES" "codex-token-overlay-MIT.txt"
   !insertmacro PayloadFile ${MODE} "\LICENSES" "golang-x-sys-BSD.txt"
+  !insertmacro PayloadFile ${MODE} "\LICENSES" "burntsushi-toml-MIT.txt"
   !insertmacro PayloadFile ${MODE} "\LICENSES" "klauspost-compress-LICENSE.txt"
 !macroend
 

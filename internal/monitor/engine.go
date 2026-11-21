@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -30,13 +31,78 @@ type Update struct {
 	SourceMapped        bool
 }
 
-func runReader(ctx context.Context, home, host, id, activePath, cacheDir string, started time.Time, publish func(Update), deps Dependencies) {
+type sourceSelection struct {
+	ownerPath, indexAtOwner, lastIndex, replacedOwner string
+}
+
+func (s *sourceSelection) choose(indexed string, err error, hint string, samePath func(string, string) bool) (string, error) {
+	if err == nil {
+		s.lastIndex = indexed
+	} else if !errors.Is(err, rollout.ErrStateIndexUnavailable) && !errors.Is(err, rollout.ErrLogNotFound) {
+		return indexed, err
+	}
+	if hint != "" && hint != s.ownerPath {
+		s.replacedOwner = s.ownerPath
+		s.ownerPath, s.indexAtOwner = hint, s.lastIndex
+	}
+	if hint == "" && s.ownerPath != "" && err == nil {
+		if samePath(indexed, s.ownerPath) {
+			return indexed, nil
+		}
+		if s.indexAtOwner == "" {
+			s.indexAtOwner = indexed
+		}
+		// Until the index advances, a dropped connection must not restore
+		// history the verified owner has already superseded.
+		if !samePath(indexed, s.indexAtOwner) && !samePath(indexed, s.replacedOwner) {
+			s.ownerPath, s.indexAtOwner, s.replacedOwner = "", "", ""
+		}
+	}
+	if s.ownerPath != "" {
+		return s.ownerPath, nil
+	}
+	return indexed, err
+}
+
+func runReader(ctx context.Context, home, host, id, cacheDir string, started time.Time, hints <-chan string, selected *sourceSelection, publish func(Update), deps Dependencies) {
 	boundaries := &rollout.BoundaryCache{}
 	boundaryPath := rollout.BoundaryCachePath(cacheDir, id)
 	boundaries.Load(boundaryPath)
 	var selectedSource source.Plan
+	var path, hint string
+	var indexErr error
+	samePath := func(left, right string) bool {
+		if left == right {
+			return true
+		}
+		options := source.Options{Home: home, Host: host}
+		a, errA := deps.Resolve(left, options)
+		b, errB := deps.Resolve(right, options)
+		if errA != nil || errB != nil {
+			return false
+		}
+		if rollout.SameRepresentationPath(a.Path, b.Path) {
+			return true
+		}
+		x, errX := os.Stat(a.Path)
+		y, errY := os.Stat(b.Path)
+		return errX == nil && errY == nil && os.SameFile(x, y)
+	}
+	refreshIndex := func() bool {
+		indexed, err := deps.IndexedPath(ctx, home, host, id)
+		next, err := selected.choose(indexed, err, hint, samePath)
+		changed := path != next || !errors.Is(indexErr, err) || !errors.Is(err, indexErr)
+		path, indexErr = next, err
+		return changed
+	}
+	refreshIndex()
+	indexTicker := time.NewTicker(2 * time.Second)
+	defer indexTicker.Stop()
 	tracked := rollout.Tracked{ID: id, CacheDir: cacheDir, Incremental: true, Started: started, Resolve: func() (rollout.History, error) {
-		h, p, err := ResolveActiveThread(ctx, home, host, id, activePath, boundaries, deps.Resolve)
+		if indexErr != nil {
+			return rollout.History{}, indexErr
+		}
+		h, p, err := ResolveActiveThread(ctx, home, host, id, path, boundaries, deps.Resolve)
 		selectedSource = p
 		return h, err
 	}}
@@ -105,7 +171,7 @@ func runReader(ctx context.Context, home, host, id, activePath, cacheDir string,
 			return
 		}
 		if changed || moved || initial || !healthy {
-			verified = Update{ID: id, Snapshot: tracked.Snapshot(), Loading: tracked.Reader.Loading(), Timing: tracked.Timing, RecoveredBoundaries: tracked.Reader.RecoveredBoundaries(), BranchVerified: activePath != "", SourceKind: selectedSource.Kind, SourceMapped: selectedSource.Mapped}
+			verified = Update{ID: id, Snapshot: tracked.Snapshot(), Loading: tracked.Reader.Loading(), Timing: tracked.Timing, RecoveredBoundaries: tracked.Reader.RecoveredBoundaries(), BranchVerified: true, SourceKind: selectedSource.Kind, SourceMapped: selectedSource.Mapped}
 			verified.ObservedAt = time.Now()
 			publish(verified)
 		}
@@ -124,8 +190,36 @@ func runReader(ctx context.Context, home, host, id, activePath, cacheDir string,
 			fallback.Reset(2 * time.Second)
 		}
 	}
+	recheckIndex := func() bool {
+		previous := path
+		if !refreshIndex() {
+			return false
+		}
+		verified, healthy = Update{}, false
+		if previous != "" && path != "" && path != previous {
+			publish(Update{ID: id, Loading: true, Message: "Loading current chat…"})
+		}
+		tracked.RecheckSource()
+		return true
+	}
+	applyHint := func(next string) bool {
+		if next == hint {
+			return false
+		}
+		hint = next
+		return recheckIndex()
+	}
 	load := func() {
 		for {
+			// Large histories load in chunks. A new head must be observed
+			// between chunks instead of waiting for the old scan to complete.
+			select {
+			case next := <-hints:
+				applyHint(next)
+			case <-indexTicker.C:
+				recheckIndex()
+			default:
+			}
 			update()
 			if ctx.Err() != nil || !healthy || tracked.Reader == nil || !tracked.Reader.Loading() {
 				return
@@ -153,6 +247,14 @@ func runReader(ctx context.Context, home, host, id, activePath, cacheDir string,
 		select {
 		case <-ctx.Done():
 			return
+		case next := <-hints:
+			if applyHint(next) {
+				load()
+			}
+		case <-indexTicker.C:
+			if recheckIndex() {
+				load()
+			}
 		case <-changes:
 			if ready == nil {
 				if debounce == nil {
@@ -194,7 +296,7 @@ func (u Update) equal(v Update) bool {
 type readerRequest struct {
 	id         string
 	host       string
-	path       string
+	hints      <-chan string
 	generation uint64
 	started    time.Time
 }
@@ -204,11 +306,18 @@ type readerRequest struct {
 func readerManager(ctx context.Context, home, configPath string, jobs <-chan readerRequest, updates chan Update, deps Dependencies) {
 	var cancel context.CancelFunc
 	var done chan struct{}
+	// Keep unresolved IPC/index disagreements across view switches. Each entry
+	// has a single writer because stop joins the old reader before reusing it.
+	selections := make(map[string]*sourceSelection)
+	var readingID string
 	stop := func() {
 		if cancel != nil {
 			cancel()
 			<-done
 			cancel = nil
+			if selections[readingID].ownerPath == "" {
+				delete(selections, readingID)
+			}
 		}
 	}
 	defer stop()
@@ -236,9 +345,18 @@ func readerManager(ctx context.Context, home, configPath string, jobs <-chan rea
 			cancel = c
 			done = make(chan struct{})
 			finished := done
+			selected := selections[job.id]
+			if selected == nil {
+				if len(selections) >= 64 {
+					clear(selections)
+				}
+				selected = &sourceSelection{}
+				selections[job.id] = selected
+			}
+			readingID = job.id
 			go func(job readerRequest) {
 				defer close(finished)
-				runReader(child, home, job.host, job.id, job.path, filepath.Dir(configPath), job.started, func(u Update) {
+				runReader(child, home, job.host, job.id, filepath.Dir(configPath), job.started, job.hints, selected, func(u Update) {
 					u.Generation = job.generation
 					select {
 					case <-child.Done():
@@ -267,16 +385,19 @@ func Run(ctx context.Context, home, configPath string, views <-chan View, publis
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	routes := make(chan Route, 1)
+	ipcViews := make(chan View, 1)
 	ipcDone := make(chan struct{})
-	go func() { defer close(ipcDone); Follow(ctx, views, routes, deps.Dial) }()
+	go func() { defer close(ipcDone); Follow(ctx, ipcViews, routes, deps.Dial) }()
 	updates := make(chan Update, 1)
 	jobs := make(chan readerRequest, 1)
 	managerDone := make(chan struct{})
 	go func() { defer close(managerDone); readerManager(ctx, home, configPath, jobs, updates, deps) }()
 	defer func() { cancel(); <-managerDone; <-ipcDone }()
 	var active string
-	var activePath string
 	var activeHost string
+	var canRead bool
+	var view View
+	var hints chan string
 	var generation uint64
 	var latest, previous Update
 	var published bool
@@ -304,7 +425,7 @@ func Run(ctx context.Context, home, configPath string, views <-chan View, publis
 		u.Timing.DeliveryMS = delivered
 		u.ID, u.Host, u.Connected = active, activeHost, last.Connected
 		u.Snapshot.ThreadID = active
-		if last.ID == active && last.Live.ChatID == active {
+		if last.epoch == view.epoch && last.ID == active && (last.Host == activeHost || activeHost == "" && last.Host == "local") && last.Live.ChatID == active {
 			u.Live = last.Live
 		}
 		if !published || !u.equal(previous) {
@@ -325,15 +446,19 @@ func Run(ctx context.Context, home, configPath string, views <-chan View, publis
 		loadStarted = time.Time{}
 		delivered = 0
 		latest = Update{ID: active, Host: activeHost}
-		if active != "" && activePath != "" {
+		if active != "" && canRead {
 			latest.Loading = true
 			latest.Message = "Loading current chat…"
 		} else if active != "" {
-			latest.Message = "Waiting for Desktop current history branch"
+			latest.Message = "Current chat log is not on this computer"
 		}
-		job := readerRequest{id: active, host: activeHost, path: activePath, generation: generation, started: selectedAt}
-		if activePath == "" {
+		hints = nil
+		job := readerRequest{id: active, host: activeHost, generation: generation, started: selectedAt}
+		if !canRead {
 			job.id = ""
+		} else {
+			hints = make(chan string, 1)
+			job.hints = hints
 		}
 		select {
 		case jobs <- job:
@@ -348,32 +473,63 @@ func Run(ctx context.Context, home, configPath string, views <-chan View, publis
 		ready = nil
 		emit()
 	}
+	selectHistory := func() {
+		host := view.Host
+		read := deps.IndexedPath != nil && view.ID != "" && (host == "local" || host == "")
+		if active != view.ID || activeHost != host || canRead != read {
+			active, activeHost, canRead = view.ID, host, read
+			restartReader()
+		}
+		if active == "" {
+			latest.Message = ipc.ViewMessage(view.Reason)
+			emit()
+		} else {
+			schedule()
+		}
+		if hints != nil {
+			path := ""
+			if last.Connected && last.epoch == view.epoch && last.ID == active && last.Host == "local" && last.Live.ChatID == active && last.Live.Available && last.Live.OwnerVerified {
+				path = last.Live.RolloutPath
+			}
+			select {
+			case <-hints:
+			default:
+			}
+			hints <- path
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case rt := <-routes:
-			last = rt
-			path := ""
-			if rt.ID != "" && rt.Live.ChatID == rt.ID && rt.Live.Available && !rt.Live.Unsupported {
-				path = rt.Live.RolloutPath
+		case selected, ok := <-views:
+			if !ok {
+				views = nil
 			}
-			if active != rt.ID || activePath != path || activeHost != rt.Host {
-				active, activePath, activeHost = rt.ID, path, rt.Host
-				restartReader()
+			if !selected.ChatPage || selected.Reason != "verified" || !ipc.ValidThreadID(selected.ID) {
+				selected.ID, selected.Host = "", ""
 			}
-			if active == "" {
-				latest.Message = ipc.ViewMessage(rt.ViewReason)
-				if !rt.Connected {
-					latest.Message = "Waiting for Desktop connection"
+			selected.epoch = view.epoch
+			if selected.ID != view.ID || selected.Host != view.Host || selected.Window != view.Window {
+				selected.epoch++
+			}
+			view = selected
+			select {
+			case ipcViews <- view:
+			default:
+				select {
+				case <-ipcViews:
+				default:
 				}
-				emit()
-			} else {
-				schedule()
+				ipcViews <- view
 			}
+			selectHistory()
+		case last = <-routes:
+			selectHistory()
 		case u := <-updates:
 			if u.ID == active && u.Generation == generation {
-				immediate := (!latest.Snapshot.HasCounts || !latest.Timing.Started.Equal(u.Timing.Started)) && u.Snapshot.HasCounts || latest.Loading && !u.Loading
+				immediate := (!latest.Snapshot.HasCounts || !latest.Timing.Started.Equal(u.Timing.Started)) && u.Snapshot.HasCounts ||
+					latest.Loading && !u.Loading || latest.BranchVerified && !u.BranchVerified
 				latest = u
 				if immediate {
 					timer.Stop()

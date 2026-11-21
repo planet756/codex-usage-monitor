@@ -93,6 +93,7 @@ const (
 	wmUISettingsChanged = 0x8006 // Private, pointer-free companion notification.
 	wmHostExited        = 0x8007
 	wmViewChanged       = 0x8008
+	wmReleaseChecked    = 0x8009
 	wmPowerBroadcast    = 0x0218
 	wmSessionChange     = 0x02B1
 )
@@ -162,9 +163,8 @@ func clientRect(h uintptr) (rect, bool) {
 }
 
 type menuEntry struct {
-	ID      uint32
-	Label   string
-	Checked bool
+	ID    uint32
+	Label string
 }
 
 func popup(h uintptr, entries []menuEntry) uint32 {
@@ -172,9 +172,6 @@ func popup(h uintptr, entries []menuEntry) uint32 {
 	defer call(user32, "DestroyMenu", m)
 	for _, e := range entries {
 		flags := uintptr(0)
-		if e.Checked {
-			flags = 8
-		}
 		if e.ID == 0 {
 			flags = 0x800
 		}

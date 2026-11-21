@@ -24,6 +24,8 @@ func Diagnostics(language string, r status.Report) string {
 		connection = "Desktop protocol unsupported"
 	} else if r.IPCConnected {
 		connection = "Connected"
+	} else if r.BranchVerified {
+		connection = "Reading local history"
 	}
 	add("Connection", tr(connection))
 	// Connection health does not establish that the selected chat's log is ready.
