@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -127,6 +128,61 @@ func TestCompressedHistoryCorruptionCancellationAndSiblingRules(t *testing.T) {
 				t.Fatalf("damaged archive accepted: %v", err)
 			}
 		})
+	}
+}
+
+func TestDuplicateCompressedAncestorRequiresIdenticalContent(t *testing.T) {
+	home := t.TempDir()
+	root := fixtureHistory(t, home, locateChat, locateChat, 0, nil, fixtureTurn("a", 1000, 1000, 100)...)
+	base := root.ref(len(root.offsets) - 1)
+	archive := compressFixture(t, root.path, true)
+	data, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copies := filepath.Join(home, "archived_sessions")
+	if err := os.MkdirAll(copies, 0700); err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(copies, filepath.Base(archive))
+	if err = os.WriteFile(copyPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	head := fixtureHistory(t, home, locateChat, locateOther, *base.Ordinal, base)
+	locator := Locator{Home: home, ActivePath: head.path, Boundaries: &BoundaryCache{}}
+	history, err := locator.Resolve(context.Background(), locateChat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, history).State.Snapshot(); got.Turns != 1 || got.Steps != 1 {
+		t.Fatalf("equivalent ancestor was counted more than once: %+v", got)
+	}
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderCRC(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recompressed := encoder.EncodeAll(root.data, nil)
+	encoder.Close()
+	if bytes.Equal(data, recompressed) {
+		t.Fatal("fixture must use different compressed bytes")
+	}
+	if err = os.WriteFile(copyPath, recompressed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	history, err = locator.Resolve(context.Background(), locateChat)
+	if err != nil {
+		t.Fatal("recompressed copy did not verify", err)
+	}
+	if got := readFixture(t, history).State.Snapshot(); got.Turns != 1 || got.Steps != 1 {
+		t.Fatalf("recompressed ancestor was counted more than once: %+v", got)
+	}
+	changed := strings.ReplaceAll(string(root.data), `"output_tokens":100`, `"output_tokens":900`)
+	if err = os.WriteFile(plainArchivePath(copyPath), []byte(changed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	compressFixture(t, plainArchivePath(copyPath), true)
+	if _, err = locator.Resolve(context.Background(), locateChat); !errors.Is(err, ErrLogAmbiguous) {
+		t.Fatalf("different archive was accepted after proof was cached: %v", err)
 	}
 }
 

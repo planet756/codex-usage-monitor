@@ -17,6 +17,7 @@ import (
 	"codex-usage-monitor/internal/metrics"
 	popupstate "codex-usage-monitor/internal/popup"
 	"codex-usage-monitor/internal/presentation"
+	"codex-usage-monitor/internal/releasecheck"
 	"codex-usage-monitor/internal/source"
 	"codex-usage-monitor/internal/status"
 	"golang.org/x/sys/windows"
@@ -31,6 +32,8 @@ type overlay struct {
 	pid                                    uint32
 	configPath                             string
 	version                                string
+	ctx                                    context.Context
+	releaseCheck                           *releasecheck.Job
 	cfg                                    config.Config
 	dpi                                    int
 	placement                              layout.Placement
@@ -76,12 +79,15 @@ var overlayProc = callback(func(h uintptr, m uint32, w, l uintptr) uintptr {
 	a := currentOverlay
 	if a != nil {
 		switch m {
+		case wmReleaseChecked:
+			a.finishReleaseCheck()
+			return 0
 		case wmUpdate:
 			a.mu.Lock()
 			u := a.pending
 			a.pending = nil
 			a.mu.Unlock()
-			if u != nil && (u.ID == "" || u.ID == a.viewResult.ID && (a.viewResult.Host == "" || u.Host == a.viewResult.Host)) {
+			if u != nil && u.ID == a.viewResult.ID && (a.viewResult.Host == "" || u.Host == a.viewResult.Host) {
 				if u.ID != a.data.ID {
 					a.collapse()
 				}
@@ -267,7 +273,8 @@ func RunOverlay(pid uint32, configPath, version string) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	a := &overlay{pid: pid, cfg: cfg, configPath: configPath, version: version, dpi: 96}
+	a := &overlay{pid: pid, cfg: cfg, configPath: configPath, version: version, ctx: ctx, dpi: 96}
+	defer func() { a.releaseCheck.Close() }()
 	a.viewRequests, a.viewResults, a.viewSelections = make(chan viewRequest, 1), make(chan viewProbe, 1), make(chan viewSelection, 1)
 	defer a.text.close()
 	defer a.surface.close()
@@ -593,7 +600,7 @@ func (a *overlay) statusSnapshot(reason string, e error) status.Report {
 	r.TurnCount, r.StepCount, r.CountsKnown, r.CountsComplete = a.data.Snapshot.Turns, a.data.Snapshot.Steps, a.data.Snapshot.HasCounts, a.data.Snapshot.CountsComplete
 	r.DecodeMS, r.DecodeSamples, r.DecodeSkipped = a.data.Snapshot.DecodeMS, a.data.Snapshot.DecodeSamples, a.data.Snapshot.DecodeSkipped
 	r.TimingComplete, r.TimingLimited = a.data.Snapshot.TimingComplete, a.data.Snapshot.TimingLimited
-	r.OwnerVerified = a.data.Live.OwnerVerified
+	r.OwnerVerified = a.data.BranchVerified || a.data.Live.OwnerVerified
 	r.HistoryComplete, r.Malformed, r.Oversized = a.data.Snapshot.HistoryComplete, a.data.Snapshot.Malformed, a.data.Snapshot.Oversized
 	r.MissingRecords = a.data.Snapshot.MissingRecords
 	var cloaked uint32
@@ -634,7 +641,7 @@ type healthKey struct {
 func (a *overlay) recordStatus(reason string, err error) {
 	key := healthKey{Reason: reason, Data: a.data.Message, Connected: a.data.Connected, Loading: a.data.Loading, Unsupported: a.data.Live.Unsupported, Complete: a.data.Snapshot.HistoryComplete, Counts: a.data.Snapshot.CountsComplete, Malformed: a.data.Snapshot.Malformed, Oversized: a.data.Snapshot.Oversized}
 	key.Generation = a.data.Generation
-	key.TimingComplete, key.TimingLimited, key.OwnerVerified = a.data.Snapshot.TimingComplete, a.data.Snapshot.TimingLimited, a.data.Live.OwnerVerified
+	key.TimingComplete, key.TimingLimited, key.OwnerVerified = a.data.Snapshot.TimingComplete, a.data.Snapshot.TimingLimited, a.data.BranchVerified || a.data.Live.OwnerVerified
 	key.RecoveredBoundaries = a.data.RecoveredBoundaries
 	key.UsageStale = a.data.Snapshot.UsageStale
 	key.MissingRecords = a.data.Snapshot.MissingRecords
@@ -682,9 +689,12 @@ func (a *overlay) pollOutside() {
 func (a *overlay) menu() {
 	a.collapse()
 	tr := func(s string) string { return i18n.Text(a.cfg.Language, s) }
-	enabled, _ := StartupStatus(a.configPath)
-	switch popup(a.hwnd, []menuEntry{{1, tr("Status"), false}, {2, tr("Settings"), false},
-		{3, tr("Start with Windows"), enabled}, {5, tr("Reposition"), false}, {0, "", false}, {4, tr("Quit"), false}}) {
+	updateLabel := "Check for Updates…"
+	if a.releaseCheck != nil {
+		updateLabel = "Checking for Updates…"
+	}
+	switch popup(a.hwnd, []menuEntry{{1, tr("Status")}, {2, tr("Settings")}, {5, tr("Reposition")}, {0, ""},
+		{6, tr(updateLabel)}, {7, tr("Project Homepage")}, {0, ""}, {4, tr("Quit")}}) {
 	case 1:
 		reason := a.statusReason
 		if a.shown {
@@ -693,15 +703,24 @@ func (a *overlay) menu() {
 		report := a.statusSnapshot(reason, nil)
 		text := presentation.Diagnostics(a.cfg.Language, report)
 		_ = status.Write(filepath.Join(filepath.Dir(a.configPath), "overlay-status.json"), report)
-		messageBox(tr("Status"), text+"\n\n"+tr("Version")+": "+a.version)
+		registration := "Startup not registered"
+		if registered, err := StartupStatus(a.configPath); err != nil {
+			registration = "Startup registration unavailable"
+		} else if registered {
+			registration = "Startup registered"
+		}
+		messageBox(tr("Status"), text+"\n\n"+tr("Start with Windows")+": "+tr(registration)+"\n"+tr("Version")+": "+a.version)
 	case 2:
 		showSettings(a.hwnd, a.configPath)
-	case 3:
-		if err := Startup(!enabled, a.configPath); err != nil {
-			messageBox(tr("Startup setting failed"), err.Error())
-		}
 	case 5:
 		a.hasPlacement = false
+	case 6:
+		if a.releaseCheck == nil {
+			hwnd := a.hwnd
+			a.releaseCheck = releasecheck.Start(a.ctx, a.version, func() { post(hwnd, wmReleaseChecked) })
+		}
+	case 7:
+		a.openProjectPage(releasecheck.ProjectURL)
 	case 4:
 		_ = Stop()
 		post(a.hwnd, wmClose)

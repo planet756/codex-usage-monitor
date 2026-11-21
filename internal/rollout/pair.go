@@ -217,11 +217,7 @@ func (r *Reader) verifyPairs(ctx context.Context) error {
 					}
 				}
 			}
-			if r.history.sources.equivalences == nil || len(r.history.sources.equivalences) >= maxHistoryCandidates {
-				r.history.sources.equivalences = make(map[string]equivalence)
-			}
-			r.history.sources.equivalences[equivalenceKey(s)] = equivalence{r.proofs[i].Stamp, s.Alternate.Stamp, s.EndOrdinal}
-			r.history.sources.dirty = true
+			r.history.sources.rememberEquivalent(equivalenceKey(s), equivalence{r.proofs[i].Stamp, s.Alternate.Stamp, s.EndOrdinal})
 			cursor.file.Close()
 			delete(r.pairReaders, i)
 		}

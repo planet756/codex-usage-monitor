@@ -224,7 +224,7 @@ func (r *Reader) restoreCheckpoint(ctx context.Context, path string, prefix bool
 		if r.history != nil {
 			limit = r.history.Segments[i].Bytes
 		}
-		if (!prefix && p.Path != parts[i].path) || (prefix && !sameRepresentationPath(p.Path, parts[i].path)) || !prefix && p.Limit != limit || p.Bytes < 0 || p.Bytes > c.Offset-bytes || p.Bytes > parts[i].length {
+		if (!prefix && p.Path != parts[i].path) || (prefix && !SameRepresentationPath(p.Path, parts[i].path)) || !prefix && p.Limit != limit || p.Bytes < 0 || p.Bytes > c.Offset-bytes || p.Bytes > parts[i].length {
 			return false
 		}
 		bytes += p.Bytes

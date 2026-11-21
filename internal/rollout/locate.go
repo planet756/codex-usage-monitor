@@ -34,6 +34,7 @@ var (
 	ErrAccountingConflict    = metrics.ErrAccountingConflict
 	ErrSourceBusy            = errors.New("history source still changing")
 	ErrBranchUnverified      = errors.New("Desktop current history branch unavailable")
+	ErrStateIndexUnavailable = errors.New("Codex state index unavailable")
 )
 
 const maxHistorySegments = 64
@@ -68,7 +69,7 @@ type logNode struct {
 type Locator struct {
 	Home       string
 	Boundaries *BoundaryCache
-	// ActivePath comes from the selected Desktop owner's revision-checked state.
+	// ActivePath comes from Codex's local state index or a verified Desktop owner.
 	// It selects the exact branch, including an empty replacement root.
 	ActivePath string
 }
@@ -236,6 +237,15 @@ func (l Locator) Resolve(ctx context.Context, id string) (History, error) {
 			b, eb := os.Stat(n.path)
 			if ea == nil && eb == nil && os.SameFile(a, b) {
 				return nil
+			}
+			if n.archive != nil {
+				compressed := &old
+				if old.archive == nil {
+					compressed = old.alternate
+				}
+				if compressed != nil {
+					return l.Boundaries.verifyArchiveCopy(ctx, *compressed, n)
+				}
 			}
 			if (old.archive == nil) != (n.archive == nil) && old.alternate == nil && n.alternate == nil {
 				if old.archive != nil {
