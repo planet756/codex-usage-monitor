@@ -5,33 +5,35 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"codex-usage-monitor/internal/semver"
 )
 
 func TestVersionOrderingAndBaselines(t *testing.T) {
 	ordered := []string{"v1.0.0-alpha", "v1.0.0-alpha.1", "v1.0.0-alpha.beta", "v1.0.0-beta", "v1.0.0-beta.2", "v1.0.0-beta.11", "v1.0.0-rc.1", "v1.0.0", "v1.0.2", "v1.0.10", "v1.1.0", "v2.0.0", "v999999999999999999999999999999.0.0"}
 	for i, a := range ordered {
-		v, err := parseVersionTag(a)
+		v, err := semver.ParseTag(a)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for j, b := range ordered {
-			other, err := parseVersionTag(b)
+			other, err := semver.ParseTag(b)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result := v.compare(other)
+			result := v.Compare(other)
 			if (i < j && result >= 0) || (i == j && result != 0) || (i > j && result <= 0) {
 				t.Fatalf("incorrect SemVer order for %s and %s: %d", a, b, result)
 			}
 		}
 	}
-	a, _ := parseVersionTag("v1.0.0+build.001")
-	b, _ := parseVersionTag("v1.0.0+other")
-	if a.compare(b) != 0 {
+	a, _ := semver.ParseTag("v1.0.0+build.001")
+	b, _ := semver.ParseTag("v1.0.0+other")
+	if a.Compare(b) != 0 {
 		t.Fatal("build metadata changed version precedence")
 	}
 	for _, tag := range []string{"", "dev", "1.0.0", "v01.0.0", "v1.0.0-01", "v1.0.0-rc..1", "v1.0.0+", "v1.0.0\nignored"} {
-		if _, err := parseVersionTag(tag); err == nil {
+		if _, err := semver.ParseTag(tag); err == nil {
 			t.Fatalf("accepted malformed tag %q", tag)
 		}
 	}
@@ -49,7 +51,7 @@ func TestVersionOrderingAndBaselines(t *testing.T) {
 		{"draft is not a baseline", "v0.2.2", "v0.2.0", []publishedRelease{{Tag: "v0.2.0"}, {Tag: "v0.2.1", Draft: true}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v, err := parseVersionTag(tc.tag)
+			v, err := semver.ParseTag(tc.tag)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,7 +61,7 @@ func TestVersionOrderingAndBaselines(t *testing.T) {
 			}
 		})
 	}
-	v, _ := parseVersionTag("v1.0.0")
+	v, _ := semver.ParseTag("v1.0.0")
 	if _, err := previousRelease("v1.0.0", v, []publishedRelease{{Tag: "v1.0.0"}}); err == nil {
 		t.Fatal("accepted an already published tag")
 	}

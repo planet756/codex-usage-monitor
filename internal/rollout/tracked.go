@@ -30,6 +30,9 @@ type Tracked struct {
 	resolutionErr  error
 }
 
+// RecheckSource forces resolution on the next update when the index changes.
+func (t *Tracked) RecheckSource() { t.nextResolve = time.Time{} }
+
 func (t *Tracked) resolve(ctx context.Context, now time.Time) (moved bool, err error) {
 	t.nextResolve = now.Add(30 * time.Second)
 	defer func() {
@@ -217,7 +220,7 @@ func (t *Tracked) Snapshot() metrics.Snapshot {
 }
 
 func identityBlocked(err error) bool {
-	return errors.Is(err, source.ErrHostUnsupported) || errors.Is(err, ErrLogPathUnsupported) || errors.Is(err, ErrBranchUnverified) || errors.Is(err, ErrArchiveInvalid) || errors.Is(err, ErrAccountingConflict) || errors.Is(err, ErrLogAmbiguous) || errors.Is(err, ErrChatMismatch) ||
+	return errors.Is(err, source.ErrHostUnsupported) || errors.Is(err, ErrLogPathUnsupported) || errors.Is(err, ErrBranchUnverified) || errors.Is(err, ErrStateIndexUnavailable) || errors.Is(err, ErrLogNotFound) || errors.Is(err, ErrArchiveInvalid) || errors.Is(err, ErrAccountingConflict) || errors.Is(err, ErrLogAmbiguous) || errors.Is(err, ErrChatMismatch) ||
 		errors.Is(err, ErrLogIdentityUnverified) || errors.Is(err, ErrLogPending) ||
 		errors.Is(err, ErrLogSearchIncomplete) || errors.Is(err, ErrLogUnreadable) ||
 		errors.Is(err, ErrHistoryMissing) || errors.Is(err, ErrHistoryBoundary) ||

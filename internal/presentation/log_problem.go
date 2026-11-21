@@ -16,6 +16,8 @@ func LogProblem(err error) string {
 		return "Current chat log is not on this computer"
 	case errors.Is(err, rollout.ErrBranchUnverified):
 		return "Waiting for Desktop current history branch"
+	case errors.Is(err, rollout.ErrStateIndexUnavailable):
+		return "Codex session index unavailable · retrying"
 	case errors.Is(err, rollout.ErrArchiveInvalid):
 		return "Compressed history invalid or exceeds limits · history withheld"
 	case errors.Is(err, rollout.ErrAccountingConflict):

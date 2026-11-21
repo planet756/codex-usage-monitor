@@ -18,6 +18,95 @@ type equivalence struct {
 
 func sameMetadata(a, b logMetadata) bool { return reflect.DeepEqual(a, b) }
 
+// Duplicate archives can use different Zstandard encodings for the same log.
+// Reuse only a proof bound to both file identities.
+func (c *BoundaryCache) verifyArchiveCopy(ctx context.Context, first, second logNode) error {
+	if second.path < first.path {
+		first, second = second, first
+	}
+	a, b := first.archive.Stamp, second.archive.Stamp
+	if first.headerHash != second.headerHash || a.Size > maxArchiveBytes || b.Size > maxArchiveBytes {
+		return ErrLogAmbiguous
+	}
+	key := sha256.Sum256([]byte("archive-copy\x00" + first.path + "\x00" + second.path))
+	k := hex.EncodeToString(key[:])
+	if proof, ok := c.equivalences[k]; ok && proof.Plain.unchanged(a) && proof.Compressed.unchanged(b) {
+		return nil
+	}
+	digest := func(path string, expected sourceStamp, decoded bool) ([32]byte, error) {
+		var sum [32]byte
+		f, err := os.Open(path)
+		if err != nil {
+			return sum, ErrHistoryChanged
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil || stampFile(f, info) != expected {
+			return sum, ErrHistoryChanged
+		}
+		var reader io.Reader = f
+		limit := expected.Size
+		if decoded {
+			d, err := archiveDecoder(ctx, f, expected.Size)
+			if err != nil {
+				return sum, archiveError(ctx, err)
+			}
+			defer recycleDecoder(d)
+			reader, limit = d, maxArchiveBytes
+		}
+		h := sha256.New()
+		n, err := io.Copy(h, cancelReader{ctx, io.LimitReader(reader, limit+1)})
+		if decoded && (err != nil || n > limit) {
+			return sum, archiveError(ctx, ErrArchiveInvalid)
+		}
+		if err != nil {
+			return sum, err
+		}
+		if !decoded && n != expected.Size {
+			return sum, ErrHistoryChanged
+		}
+		h.Sum(sum[:0])
+		return sum, nil
+	}
+	match := func(decoded bool) (bool, error) {
+		left, err := digest(first.path, a, decoded)
+		if err != nil {
+			return false, err
+		}
+		right, err := digest(second.path, b, decoded)
+		return left == right, err
+	}
+	var same bool
+	var err error
+	if a.Size == b.Size {
+		same, err = match(false)
+	}
+	if err == nil && !same {
+		same, err = match(true)
+	}
+	if err != nil {
+		return err
+	}
+	currentA, ea := stampPath(first.path)
+	currentB, eb := stampPath(second.path)
+	if ea != nil || eb != nil || currentA != a || currentB != b {
+		return ErrHistoryChanged
+	}
+	if !same {
+		return ErrLogAmbiguous
+	}
+	c.rememberEquivalent(k, equivalence{a, b, -1})
+	return nil
+}
+
+func (c *BoundaryCache) rememberEquivalent(key string, proof equivalence) {
+	if c.equivalences == nil || len(c.equivalences) >= maxHistoryCandidates {
+		c.equivalences = make(map[string]equivalence)
+	}
+	c.equivalences[key] = proof
+	c.dirty = true
+}
+
 // Cross-directory recovery copies are accepted only after their selected
 // accounting prefix has been proved equivalent. Sibling precedence belongs to
 // Codex's representation rules; unrelated same-format copies stay ambiguous.
@@ -63,11 +152,7 @@ func (c *BoundaryCache) equivalent(ctx context.Context, plain, compressed logNod
 	if ea != nil || eb != nil || currentA != a || currentB != b {
 		return ErrHistoryChanged
 	}
-	if c.equivalences == nil || len(c.equivalences) >= maxHistoryCandidates {
-		c.equivalences = make(map[string]equivalence)
-	}
-	c.equivalences[key] = equivalence{a, b, end}
-	c.dirty = true
+	c.rememberEquivalent(key, equivalence{a, b, end})
 	return nil
 }
 

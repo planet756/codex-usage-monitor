@@ -18,14 +18,14 @@ type paintStruct struct {
 }
 
 type settingsWindow struct {
-	hwnd, language, theme, languageLabel, themeLabel, heading, subtitle, note, done uintptr
-	font, smallFont, headerFont                                                     uintptr
-	path                                                                            string
-	applied                                                                         config.Config
-	dpi                                                                             int
-	saved                                                                           bool
-	refreshUnconfirmed                                                              bool
+	hwnd, language, theme, startup, languageLabel, themeLabel, heading, subtitle, saveButton uintptr
+	font, smallFont, headerFont                                                              uintptr
+	path                                                                                     string
+	applied                                                                                  config.Config
+	dpi                                                                                      int
 }
+
+const startupCheckboxID = 103
 
 var currentSettings *settingsWindow
 var settingsRegistered bool
@@ -52,11 +52,12 @@ var settingsProc = callback(func(h uintptr, m uint32, w, l uintptr) uintptr {
 	if s != nil && s.hwnd == h {
 		switch m {
 		case wmCommand:
-			id, notification := uint16(w), uint16(w>>16)
-			switch {
-			case (id == 101 || id == 102) && notification == 1: // CBN_SELCHANGE
-				s.apply()
-			case id == 1 || id == 2: // Done, Enter, Escape.
+			switch uint16(w) {
+			case 1: // Save or Enter.
+				if s.save() {
+					call(user32, "DestroyWindow", h)
+				}
+			case 2: // Escape.
 				call(user32, "DestroyWindow", h)
 			}
 			return 0
@@ -118,7 +119,7 @@ func showSettings(owner uintptr, path string) {
 	}
 	dpi := dpiFor(owner)
 	p := func(n int) int { return scale(n, dpi) }
-	r := rect{Right: int32(p(420)), Bottom: int32(p(312))}
+	r := rect{Right: int32(p(420)), Bottom: int32(p(350))}
 	const style = 0x00C80000 // Caption and system menu; native fixed-size settings.
 	call(user32, "AdjustWindowRectEx", uintptr(unsafe.Pointer(&r)), style, 0, 0x10000)
 	x, y := (int(call(user32, "GetSystemMetrics", 0))-r.width())/2, (int(call(user32, "GetSystemMetrics", 1))-r.height())/2
@@ -159,9 +160,9 @@ func showSettings(owner uintptr, path string) {
 	}
 	s.themeLabel = makeControl("STATIC", "", 0, 0, 22, 172, 376, 22, s.font)
 	s.theme = makeControl("COMBOBOX", "", 0x00210003, 102, 22, 198, 376, 180, s.font)
-	s.note = makeControl("STATIC", "", 0, 0, 22, 271, 272, 22, s.smallFont)
-	s.done = makeControl("BUTTON", "", 0x00010001, 1, 314, 266, 84, 32, s.font)
-	for _, control := range []uintptr{s.heading, s.subtitle, s.languageLabel, s.language, s.themeLabel, s.theme, s.note, s.done} {
+	s.startup = makeControl("BUTTON", "", 0x00010003, startupCheckboxID, 22, 246, 376, 24, s.font) // WS_TABSTOP | BS_AUTOCHECKBOX
+	s.saveButton = makeControl("BUTTON", "", 0x00010001, 1, 314, 304, 84, 32, s.font)
+	for _, control := range []uintptr{s.heading, s.subtitle, s.languageLabel, s.language, s.themeLabel, s.theme, s.startup, s.saveButton} {
 		if control == 0 {
 			call(user32, "DestroyWindow", h)
 			fail(fmt.Errorf("Could not create settings controls"))
@@ -182,15 +183,8 @@ func showSettings(owner uintptr, path string) {
 
 func (s *settingsWindow) labels() {
 	lang := s.applied.Language
-	note := "Changes apply immediately."
-	if s.saved {
-		note = "Saved"
-	}
-	if s.refreshUnconfirmed {
-		note = "Saved · refresh not confirmed"
-	}
 	for control, label := range map[uintptr]string{s.hwnd: "Settings", s.heading: "Settings", s.languageLabel: "Language",
-		s.themeLabel: "Appearance", s.note: note, s.done: "Done"} {
+		s.themeLabel: "Appearance", s.startup: "Start with Windows", s.saveButton: "Save"} {
 		call(user32, "SetWindowTextW", control, uintptr(unsafe.Pointer(utf(i18n.Text(lang, label)))))
 	}
 	languageIndex := uintptr(0)
@@ -209,23 +203,29 @@ func (s *settingsWindow) labels() {
 		themeIndex = 2
 	}
 	call(user32, "SendMessageW", s.theme, 0x14E, themeIndex, 0)
-	call(user32, "RedrawWindow", s.hwnd, 0, 0, 0x185) // Invalidate + erase + all children + update now.
+	var state uintptr
+	if s.applied.StartWithWindows {
+		state = 1
+	}
+	call(user32, "SendMessageW", s.startup, 0xF1, state, 0) // BM_SETCHECK
+	call(user32, "RedrawWindow", s.hwnd, 0, 0, 0x185)       // Invalidate + erase + all children + update now.
 }
 
-func (s *settingsWindow) apply() {
+func (s *settingsWindow) save() bool {
 	language, theme := call(user32, "SendMessageW", s.language, 0x147, 0, 0), call(user32, "SendMessageW", s.theme, 0x147, 0, 0)
 	if language > 1 || theme > 2 {
-		return
+		return false
 	}
-	cfg, err := config.UpdateUI(s.path, []string{"en", "zh-CN"}[language], []string{"auto", "light", "dark"}[theme])
+	enabled := call(user32, "SendMessageW", s.startup, 0xF0, 0, 0) == 1 // BM_GETCHECK
+	err := config.UpdateWindowsUI(s.path, []string{"en", "zh-CN"}[language], []string{"auto", "light", "dark"}[theme], enabled, func(enabled bool) error {
+		return registerStartup(enabled, s.path)
+	})
 	if err != nil {
-		s.labels() // Restore the committed selection on a failed save.
 		messageBox(i18n.Text(s.applied.Language, "Settings could not be saved"), err.Error())
-		return
+		return false
 	}
-	s.applied, s.saved = cfg, true
-	s.refreshUnconfirmed = !notifySettingsChanged()
-	s.labels()
+	notifySettingsChanged()
+	return true
 }
 
 // One permanent callback; NewCallback allocations cannot be reclaimed.
@@ -260,20 +260,13 @@ func notifySettingsWindow(target uintptr) bool {
 		uintptr(unsafe.Pointer(&acknowledged))) != 0 && acknowledged == 1 {
 		return true
 	}
-	// A busy recipient may still catch up after the bounded synchronous attempt.
-	// The settings note reports that refresh was not confirmed, rather than
-	// silently treating an unacknowledged reload as applied.
+	// A busy recipient can reload once it resumes pumping messages.
 	post(target, wmUISettingsChanged)
 	return false
 }
 
-func notifySettingsChanged() bool {
-	targets := settingsWindows()
-	confirmed := len(targets) > 0
-	for _, target := range targets {
-		if !notifySettingsWindow(target) && call(user32, "IsWindow", target) != 0 {
-			confirmed = false
-		}
+func notifySettingsChanged() {
+	for _, target := range settingsWindows() {
+		notifySettingsWindow(target)
 	}
-	return confirmed
 }

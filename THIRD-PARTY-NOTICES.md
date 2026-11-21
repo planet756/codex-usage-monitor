@@ -20,6 +20,9 @@ dsh-status-bar reference estimator is no longer used.
 The Go dependency `golang.org/x/sys` is distributed under the Go project's
 BSD-style license, included in `LICENSES/golang-x-sys-BSD.txt`.
 
+`github.com/BurntSushi/toml` v1.6.0 reads Codex's TOML configuration.
+Its MIT license is included in `LICENSES/burntsushi-toml-MIT.txt`.
+
 `github.com/klauspost/compress` v1.20.3 supplies the pure Go Zstandard decoder.
 Its license is included in `LICENSES/klauspost-compress-LICENSE.txt`.
 No separate decoder executable or native compression DLL is required.

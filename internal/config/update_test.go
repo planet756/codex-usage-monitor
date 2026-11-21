@@ -95,6 +95,43 @@ func TestStartupRegistrationFailureRestoresSavedPreference(t *testing.T) {
 	}
 }
 
+func TestUpdateWindowsUISavesPreferencesTogether(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	before := Default()
+	before.CodexHome = "custom-data-source"
+	if err := Save(p, before); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("registration denied")
+	calls := 0
+	apply := func(enabled bool) error {
+		calls++
+		stored, err := Load(p)
+		if err != nil || enabled || stored.StartWithWindows || stored.Language != "zh-CN" || stored.Theme != "dark" || stored.CodexHome != before.CodexHome {
+			t.Fatalf("registration saw inconsistent settings: %+v, %v", stored, err)
+		}
+		if calls == 1 {
+			return denied
+		}
+		return nil
+	}
+	if err := UpdateWindowsUI(p, "zh-CN", "dark", false, apply); !errors.Is(err, denied) {
+		t.Fatal(err)
+	}
+	if got, err := Load(p); err != nil || got != before {
+		t.Fatalf("failed registration left partial settings: %+v, %v", got, err)
+	}
+	if err := UpdateWindowsUI(p, "zh-CN", "dark", false, apply); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateWindowsUI(p, "zh-CN", "dark", false, apply); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Load(p); err != nil || calls != 3 || got.StartWithWindows || got.Language != "zh-CN" || got.Theme != "dark" || got.CodexHome != before.CodexHome {
+		t.Fatalf("an unchanged Save did not reconcile startup: %+v, %v; registration calls %d", got, err, calls)
+	}
+}
+
 func TestInvalidStartupSettingsNeverTouchRegistration(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "settings.json")
 	for _, contents := range []string{`{`, `{"start_with_windows":"yes"}`, `{"language":"unknown"}`} {

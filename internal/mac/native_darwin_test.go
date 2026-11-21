@@ -2,6 +2,7 @@ package mac
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	"codex-usage-monitor/internal/rollout"
 	"github.com/ebitengine/purego/objc"
 )
 
@@ -31,6 +33,51 @@ func TestNativeBridgeUnicodeAndCGRectRoundTrip(t *testing.T) {
 	v := objc.ID(objc.GetClass("NSValue")).Send(sel("valueWithRect:"), want)
 	if got := objc.Send[rect](v, sel("rectValue")); got != want {
 		t.Fatalf("native struct round trip: %+v", got)
+	}
+}
+
+func TestNativeStateDatabaseResolvesIndexedLog(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	home := t.TempDir()
+	const id = "00000000-0000-7000-8000-000000000001"
+	if _, err := indexedRolloutPath(context.Background(), home, "local", id); !errors.Is(err, rollout.ErrStateIndexUnavailable) {
+		t.Fatalf("missing state index: %v", err)
+	}
+	path := filepath.Join(home, "state_5.sqlite")
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("read-only lookup created a state database")
+	}
+	a, err := loadSQLite()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var db uintptr
+	code := a.open(path, &db, 6, 0) // SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
+	if db != 0 {
+		defer a.closeDB(db)
+	}
+	if code != 0 {
+		t.Fatalf("open state fixture: %d", code)
+	}
+	exec := func(sql, value string) {
+		t.Helper()
+		var stmt uintptr
+		if a.prepare(db, sql, -1, &stmt, nil) != 0 {
+			t.Fatal("prepare state fixture")
+		}
+		defer a.finalize(stmt)
+		if value != "" && a.bind(stmt, 1, value, -1, ^uintptr(0)) != 0 {
+			t.Fatal("bind fixture path")
+		}
+		if a.step(stmt) != 101 {
+			t.Fatal("write state fixture")
+		}
+	}
+	exec("CREATE TABLE threads(id TEXT PRIMARY KEY, rollout_path TEXT)", "")
+	rolloutPath := filepath.Join(home, "会话", "history.jsonl")
+	exec("INSERT INTO threads VALUES ('"+id+"', ?1)", rolloutPath)
+	if got, err := indexedRolloutPath(context.Background(), home, "local", id); got != rolloutPath || err != nil {
+		t.Fatalf("indexed path = %q, %v", got, err)
 	}
 }
 

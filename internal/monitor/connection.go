@@ -14,9 +14,10 @@ import (
 )
 
 type Route struct {
-	ID, Host, ViewReason string
-	Connected            bool
-	Live                 live.View
+	ID, Host  string
+	Connected bool
+	Live      live.View
+	epoch     uint64
 }
 
 func Follow(ctx context.Context, views <-chan View, out chan<- Route, dial func(context.Context) (io.ReadWriteCloser, error)) {
@@ -30,34 +31,30 @@ func Follow(ctx context.Context, views <-chan View, out chan<- Route, dial func(
 	var currentView View
 	for ctx.Err() == nil {
 		f, e := dial(ctx)
-		if e != nil {
-			publish(Route{})
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-			delay = min(delay*2, 5*time.Second)
-			continue
-		}
-		delay = 250 * time.Millisecond
-		closed := make(chan struct{})
-		stop := context.AfterFunc(ctx, func() { defer close(closed); f.Close() })
-		var nonce [16]byte
-		_, _ = rand.Read(nonce[:])
-		e = ipc.WriteFrame(f, map[string]any{"type": "request", "requestId": hex.EncodeToString(nonce[:]), "sourceClientId": "initializing-client", "version": 0, "method": "initialize", "params": map[string]string{"clientType": "codex-usage-monitor"}})
 		if e == nil {
-			publish(Route{Connected: true})
-			e = FollowConnection(ctx, f, views, &currentView, publish)
+			delay = 250 * time.Millisecond
+			closed := make(chan struct{})
+			stop := context.AfterFunc(ctx, func() { defer close(closed); f.Close() })
+			var nonce [16]byte
+			_, _ = rand.Read(nonce[:])
+			e = ipc.WriteFrame(f, map[string]any{"type": "request", "requestId": hex.EncodeToString(nonce[:]), "sourceClientId": "initializing-client", "version": 0, "method": "initialize", "params": map[string]string{"clientType": "codex-usage-monitor"}})
+			if e == nil {
+				select {
+				case currentView = <-views:
+				default:
+				}
+				publish(Route{Connected: true})
+				e = FollowConnection(ctx, f, views, &currentView, publish)
+			}
+			if !stop() {
+				<-closed
+			}
+			f.Close()
+			if errors.Is(e, context.Canceled) {
+				return
+			}
 		}
-		if !stop() {
-			<-closed
-		}
-		f.Close()
 		publish(Route{})
-		if errors.Is(e, context.Canceled) {
-			return
-		}
 		select {
 		case <-ctx.Done():
 			return
@@ -120,7 +117,7 @@ func FollowConnection(parent context.Context, f io.ReadWriteCloser, views <-chan
 		return nil
 	}
 	emit := func() {
-		publish(Route{ID: session.Active.ID, Host: session.Active.Host, ViewReason: current.Reason, Connected: true, Live: stream.View()})
+		publish(Route{ID: session.Active.ID, Host: session.Active.Host, Connected: true, Live: stream.View(), epoch: current.epoch})
 	}
 	for {
 		select {
@@ -143,9 +140,10 @@ func FollowConnection(parent context.Context, f io.ReadWriteCloser, views <-chan
 			}
 			recovery.Update(stream.NeedsResync())
 		case view := <-views:
+			changedView := view.epoch != current.epoch
 			*current = view
 			out, changed := session.SetView(view.ID, view.Host)
-			if err := update(out, changed); err != nil {
+			if err := update(out, changed || changedView); err != nil {
 				return err
 			}
 			emit()
