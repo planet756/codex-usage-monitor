@@ -690,7 +690,10 @@ func (a *overlay) menu() {
 	a.collapse()
 	tr := func(s string) string { return i18n.Text(a.cfg.Language, s) }
 	updateLabel := "Check for Updates…"
-	if a.releaseCheck != nil {
+	updating := updateInProgress()
+	if updating {
+		updateLabel = "Installing Update…"
+	} else if a.releaseCheck != nil {
 		updateLabel = "Checking for Updates…"
 	}
 	switch popup(a.hwnd, []menuEntry{{1, tr("Status")}, {2, tr("Settings")}, {5, tr("Reposition")}, {0, ""},
@@ -715,7 +718,7 @@ func (a *overlay) menu() {
 	case 5:
 		a.hasPlacement = false
 	case 6:
-		if a.releaseCheck == nil {
+		if a.releaseCheck == nil && !updating {
 			hwnd := a.hwnd
 			a.releaseCheck = releasecheck.Start(a.ctx, a.version, func() { post(hwnd, wmReleaseChecked) })
 		}

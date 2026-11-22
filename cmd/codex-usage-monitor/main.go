@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"codex-usage-monitor/internal/config"
 	"codex-usage-monitor/internal/rollout"
@@ -19,6 +20,7 @@ type options struct {
 	addStartMenu, removeStartMenu                                          bool
 	pid                                                                    uint
 	configPath, inspect                                                    string
+	updateTarget, updateVersion                                            string
 }
 
 func main() {
@@ -43,12 +45,17 @@ func run() error {
 	fs.BoolVar(&o.removeStartMenu, "remove-start-menu", false, "remove the current-user Start menu shortcut")
 	fs.BoolVar(&o.stop, "stop", false, "stop the watcher and its overlays")
 	fs.BoolVar(&o.diagnostics, "diagnostics", false, "print running monitor process resource counters")
+	fs.StringVar(&o.updateTarget, "update-target", "", "internal Windows updater executable path")
+	fs.StringVar(&o.updateVersion, "update-version", "", "internal Windows updater release tag")
 	showVersion := fs.Bool("version", false, "print version")
 	if e := fs.Parse(os.Args[1:]); e != nil {
 		return e
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments")
+	}
+	if runtime.GOOS != "windows" && (o.updateTarget != "" || o.updateVersion != "") {
+		return fmt.Errorf("the in-app updater is only available on Windows")
 	}
 	if o.inspect != "" || *showVersion || o.install || o.uninstall || o.startupStatus || o.stop || o.diagnostics || o.addStartMenu || o.removeStartMenu {
 		prepareConsole()
