@@ -16,7 +16,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const stopName = `Local\CodexUsageMonitor.Stop`
+const (
+	watcherMutex = `Local\CodexUsageMonitor.Watcher`
+	stopName     = `Local\CodexUsageMonitor.Stop`
+)
 
 const (
 	watchFallback = 1
@@ -158,7 +161,7 @@ func RunWatcher(configPath string, notifyExisting bool) error {
 		func() error { return Startup(true, configPath) }); err != nil {
 		messageBox(i18n.Text(cfg.Language, "Startup setting failed"), err.Error())
 	}
-	mutex, e := windows.CreateMutex(nil, false, utf(`Local\CodexUsageMonitor.Watcher`))
+	mutex, e := windows.CreateMutex(nil, false, utf(watcherMutex))
 	if errors.Is(e, windows.ERROR_ALREADY_EXISTS) {
 		windows.CloseHandle(mutex)
 		if notifyExisting {

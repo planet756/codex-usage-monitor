@@ -11,6 +11,9 @@ import (
 func prepareConsole()   { win.PrepareConsole() }
 func showError(e error) { fmt.Fprintln(os.Stderr, e); win.ShowError(e.Error()) }
 func platformRun(o options) error {
+	if o.updateTarget != "" || o.updateVersion != "" {
+		return win.RunUpdate(version, o.updateVersion, o.updateTarget, o.configPath)
+	}
 	if o.addStartMenu || o.removeStartMenu {
 		if o.addStartMenu && o.removeStartMenu {
 			return fmt.Errorf("choose add or remove Start menu shortcut")
